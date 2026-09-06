@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
-import matplotlib.pyplot as plt
 
 
 # ============================================================
@@ -137,8 +136,9 @@ except Exception as e:
     st.code(str(e))
 
     st.info(
-        "Make sure your data folder contains pull_requests.csv, "
-        "incidents.csv, code_diffs.csv and reviews.csv."
+        "Make sure your data folder contains: "
+        "pull_requests.csv, incidents.csv, "
+        "code_diffs.csv and reviews.csv."
     )
 
     st.stop()
@@ -316,14 +316,24 @@ def generate_runbook(pr_id):
     if incident is None:
 
         problem = pr["Description"]
-        root_cause = "Incident information unavailable."
-        incident_resolution = "Not available."
+
+        root_cause = (
+            "Incident information unavailable."
+        )
+
+        incident_resolution = (
+            "Not available."
+        )
 
     else:
 
         problem = incident["Problem"]
+
         root_cause = incident["Discussion"]
-        incident_resolution = incident["Final_Resolution"]
+
+        incident_resolution = (
+            incident["Final_Resolution"]
+        )
 
     # --------------------------------------------------------
     # Code diff information
@@ -331,14 +341,20 @@ def generate_runbook(pr_id):
 
     if diff is None:
 
-        changed_file = "Code diff unavailable."
+        changed_file = (
+            "Code diff unavailable."
+        )
+
         old_code = "Not available."
+
         new_code = "Not available."
 
     else:
 
         changed_file = diff["File"]
+
         old_code = diff["Old_Code"]
+
         new_code = diff["New_Code"]
 
     # --------------------------------------------------------
@@ -373,7 +389,9 @@ def generate_runbook(pr_id):
         + str(pr["Resolution"])
     )
 
-    high_impact = is_high_impact(combined_text)
+    high_impact = is_high_impact(
+        combined_text
+    )
 
     # --------------------------------------------------------
     # Runbook
@@ -391,33 +409,44 @@ def generate_runbook(pr_id):
 
         "Solution": pr["Resolution"],
 
-        "Incident Resolution": incident_resolution,
+        "Incident Resolution":
+            incident_resolution,
 
-        "Changed File": changed_file,
+        "Changed File":
+            changed_file,
 
-        "Old Code": old_code,
+        "Old Code":
+            old_code,
 
-        "New Code": new_code,
+        "New Code":
+            new_code,
 
-        "Reviewer": (
-            review["Reviewer"]
-            if review is not None
-            else "Unavailable"
-        ),
+        "Reviewer":
+            (
+                review["Reviewer"]
+                if review is not None
+                else "Unavailable"
+            ),
 
-        "Reviewer Status": reviewer_status,
+        "Reviewer Status":
+            reviewer_status,
 
-        "Verification": verification,
+        "Verification":
+            verification,
 
-        "Verification Status": verification_status,
+        "Verification Status":
+            verification_status,
 
-        "Confidence": confidence,
+        "Confidence":
+            confidence,
 
-        "High Impact": high_impact,
+        "High Impact":
+            high_impact,
 
-        "Created At": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        )
+        "Created At":
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
     }
 
     return runbook
@@ -430,42 +459,53 @@ def generate_runbook(pr_id):
 def mock_api_send(pr_id):
 
     pr = get_pr(pr_id)
+
     incident = get_incident(pr_id)
+
     diff = get_diff(pr_id)
+
     review = get_review(pr_id)
 
     payload = {
 
-        "source": "Mock Engineering API",
+        "source":
+            "Mock Engineering API",
 
-        "timestamp": datetime.now().isoformat(),
+        "timestamp":
+            datetime.now().isoformat(),
 
-        "pull_request": (
-            pr.to_dict()
-            if pr is not None
-            else {}
-        ),
+        "pull_request":
+            (
+                pr.to_dict()
+                if pr is not None
+                else {}
+            ),
 
-        "incident": (
-            incident.to_dict()
-            if incident is not None
-            else {}
-        ),
+        "incident":
+            (
+                incident.to_dict()
+                if incident is not None
+                else {}
+            ),
 
-        "code_diff": (
-            diff.to_dict()
-            if diff is not None
-            else {}
-        ),
+        "code_diff":
+            (
+                diff.to_dict()
+                if diff is not None
+                else {}
+            ),
 
-        "review": (
-            review.to_dict()
-            if review is not None
-            else {}
-        )
+        "review":
+            (
+                review.to_dict()
+                if review is not None
+                else {}
+            )
     }
 
-    st.session_state.api_records.append(payload)
+    st.session_state.api_records.append(
+        payload
+    )
 
     add_audit(
         "API Data Received",
@@ -479,7 +519,9 @@ def mock_api_send(pr_id):
 # SIDEBAR
 # ============================================================
 
-st.sidebar.title("🛠️ Maintenance Assistant")
+st.sidebar.title(
+    "🛠️ Maintenance Assistant"
+)
 
 st.sidebar.caption(
     "Knowledge capture and verified runbook prototype"
@@ -557,7 +599,9 @@ if page == "🏠 Dashboard":
             len(reviews)
         )
 
-    st.subheader("🎯 Project Objective")
+    st.subheader(
+        "🎯 Project Objective"
+    )
 
     st.write(
         """
@@ -570,7 +614,9 @@ if page == "🏠 Dashboard":
         """
     )
 
-    st.subheader("🔄 System Workflow")
+    st.subheader(
+        "🔄 System Workflow"
+    )
 
     st.code(
         """
@@ -615,14 +661,18 @@ Validation
 
 elif page == "📋 Pull Requests":
 
-    st.title("📋 Pull Requests")
+    st.title(
+        "📋 Pull Requests"
+    )
 
     st.dataframe(
         pull_requests,
         use_container_width=True
     )
 
-    st.subheader("Pull Request Details")
+    st.subheader(
+        "Pull Request Details"
+    )
 
     pr_id = st.selectbox(
         "Select Pull Request",
@@ -633,31 +683,51 @@ elif page == "📋 Pull Requests":
 
     if pr is not None:
 
-        st.write("### Title")
+        st.write(
+            "### Title"
+        )
 
-        st.write(pr["Title"])
+        st.write(
+            pr["Title"]
+        )
 
-        st.write("### Description")
+        st.write(
+            "### Description"
+        )
 
-        st.write(pr["Description"])
+        st.write(
+            pr["Description"]
+        )
 
-        st.write("### Resolution")
+        st.write(
+            "### Resolution"
+        )
 
-        st.success(pr["Resolution"])
+        st.success(
+            pr["Resolution"]
+        )
 
         col1, col2, col3 = st.columns(3)
 
         with col1:
 
-            st.write("Reviewer")
+            st.write(
+                "Reviewer"
+            )
 
-            st.write(pr["Reviewer"])
+            st.write(
+                pr["Reviewer"]
+            )
 
         with col2:
 
-            st.write("Status")
+            st.write(
+                "Status"
+            )
 
-            st.write(pr["Status"])
+            st.write(
+                pr["Status"]
+            )
 
         with col3:
 
@@ -669,11 +739,15 @@ elif page == "📋 Pull Requests":
                 + str(pr["Resolution"])
             ):
 
-                st.warning("⚠️ High Impact")
+                st.warning(
+                    "⚠️ High Impact"
+                )
 
             else:
 
-                st.success("Normal Impact")
+                st.success(
+                    "Normal Impact"
+                )
 
 
 # ============================================================
@@ -682,14 +756,18 @@ elif page == "📋 Pull Requests":
 
 elif page == "🚨 Incidents":
 
-    st.title("🚨 Incident Discussions")
+    st.title(
+        "🚨 Incident Discussions"
+    )
 
     st.dataframe(
         incidents,
         use_container_width=True
     )
 
-    st.subheader("Incident Details")
+    st.subheader(
+        "Incident Details"
+    )
 
     pr_id = st.selectbox(
         "Select PR",
@@ -700,15 +778,25 @@ elif page == "🚨 Incidents":
 
     if incident is not None:
 
-        st.write("### Problem")
+        st.write(
+            "### Problem"
+        )
 
-        st.write(incident["Problem"])
+        st.write(
+            incident["Problem"]
+        )
 
-        st.write("### Team Discussion")
+        st.write(
+            "### Team Discussion"
+        )
 
-        st.info(incident["Discussion"])
+        st.info(
+            incident["Discussion"]
+        )
 
-        st.write("### Final Resolution")
+        st.write(
+            "### Final Resolution"
+        )
 
         st.success(
             incident["Final_Resolution"]
@@ -721,7 +809,9 @@ elif page == "🚨 Incidents":
 
 elif page == "📘 Generate Runbook":
 
-    st.title("📘 Generate Maintenance Runbook")
+    st.title(
+        "📘 Generate Maintenance Runbook"
+    )
 
     pr_id = st.selectbox(
         "Select completed Pull Request",
@@ -733,7 +823,9 @@ elif page == "📘 Generate Runbook":
         type="primary"
     ):
 
-        runbook = generate_runbook(pr_id)
+        runbook = generate_runbook(
+            pr_id
+        )
 
         if runbook is not None:
 
@@ -750,13 +842,11 @@ elif page == "📘 Generate Runbook":
                 "Runbook generated successfully!"
             )
 
-    # --------------------------------------------------------
-    # Display latest runbook
-    # --------------------------------------------------------
-
     if st.session_state.runbooks:
 
-        runbook = st.session_state.runbooks[-1]
+        runbook = (
+            st.session_state.runbooks[-1]
+        )
 
         st.divider()
 
@@ -772,19 +862,25 @@ elif page == "📘 Generate Runbook":
 
         with col1:
 
-            st.write("### Problem")
+            st.write(
+                "### Problem"
+            )
 
             st.write(
                 runbook["Problem"]
             )
 
-            st.write("### Root Cause")
+            st.write(
+                "### Root Cause"
+            )
 
             st.write(
                 runbook["Root Cause"]
             )
 
-            st.write("### Solution")
+            st.write(
+                "### Solution"
+            )
 
             st.success(
                 runbook["Solution"]
@@ -792,15 +888,22 @@ elif page == "📘 Generate Runbook":
 
         with col2:
 
-            st.write("### Verification")
+            st.write(
+                "### Verification"
+            )
 
             st.write(
                 runbook["Verification"]
             )
 
-            st.write("### Verification Status")
+            st.write(
+                "### Verification Status"
+            )
 
-            if runbook["Verification Status"] == "Verified":
+            if (
+                runbook["Verification Status"]
+                == "Verified"
+            ):
 
                 st.success(
                     runbook["Verification Status"]
@@ -812,7 +915,9 @@ elif page == "📘 Generate Runbook":
                     runbook["Verification Status"]
                 )
 
-            st.write("### Confidence")
+            st.write(
+                "### Confidence"
+            )
 
             st.progress(
                 runbook["Confidence"] / 100
@@ -824,17 +929,22 @@ elif page == "📘 Generate Runbook":
 
         st.divider()
 
-        st.write("### 🔧 Code Change")
+        st.write(
+            "### 🔧 Code Change"
+        )
 
         st.write(
-            f"**File:** {runbook['Changed File']}"
+            f"**File:** "
+            f"{runbook['Changed File']}"
         )
 
         col1, col2 = st.columns(2)
 
         with col1:
 
-            st.write("Old Code")
+            st.write(
+                "Old Code"
+            )
 
             st.code(
                 str(runbook["Old Code"])
@@ -842,7 +952,9 @@ elif page == "📘 Generate Runbook":
 
         with col2:
 
-            st.write("New Code")
+            st.write(
+                "New Code"
+            )
 
             st.code(
                 str(runbook["New Code"])
@@ -851,8 +963,11 @@ elif page == "📘 Generate Runbook":
         if runbook["High Impact"]:
 
             st.warning(
-                "⚠️ This runbook contains a high-impact change. "
-                "Human confirmation is required before approval."
+                """
+                ⚠️ This runbook contains a high-impact
+                change. Human confirmation is required
+                before approval.
+                """
             )
 
         else:
@@ -868,7 +983,9 @@ elif page == "📘 Generate Runbook":
 
 elif page == "✅ Review Runbooks":
 
-    st.title("✅ Human Review")
+    st.title(
+        "✅ Human Review"
+    )
 
     if not st.session_state.runbooks:
 
@@ -885,11 +1002,13 @@ elif page == "✅ Review Runbooks":
             st.divider()
 
             st.subheader(
-                f"{runbook['PR_ID']} - {runbook['Title']}"
+                f"{runbook['PR_ID']} - "
+                f"{runbook['Title']}"
             )
 
             st.write(
-                f"**Confidence:** {runbook['Confidence']}%"
+                f"**Confidence:** "
+                f"{runbook['Confidence']}%"
             )
 
             st.write(
@@ -897,29 +1016,29 @@ elif page == "✅ Review Runbooks":
                 f"{runbook['Verification Status']}"
             )
 
-            # ------------------------------------------------
-            # Check evidence
-            # ------------------------------------------------
-
-            if runbook["Changed File"] == "Code diff unavailable.":
+            if (
+                runbook["Changed File"]
+                == "Code diff unavailable."
+            ):
 
                 st.error(
-                    "❌ Approval blocked: Code diff is missing."
+                    "❌ Approval blocked: "
+                    "Code diff is missing."
                 )
 
                 continue
 
-            if runbook["Reviewer Status"].lower() != "approved":
+            if (
+                runbook["Reviewer Status"].lower()
+                != "approved"
+            ):
 
                 st.warning(
-                    "⏳ Approval blocked: Reviewer approval is required."
+                    "⏳ Approval blocked: "
+                    "Reviewer approval is required."
                 )
 
                 continue
-
-            # ------------------------------------------------
-            # High impact confirmation
-            # ------------------------------------------------
 
             confirmation = False
 
@@ -930,17 +1049,14 @@ elif page == "✅ Review Runbooks":
                 )
 
                 confirmation = st.checkbox(
-                    "I confirm that this high-impact runbook has been manually reviewed.",
+                    "I confirm that this high-impact "
+                    "runbook has been manually reviewed.",
                     key=f"confirm_{index}"
                 )
 
             else:
 
                 confirmation = True
-
-            # ------------------------------------------------
-            # Approve / Reject
-            # ------------------------------------------------
 
             col1, col2 = st.columns(2)
 
@@ -959,7 +1075,11 @@ elif page == "✅ Review Runbooks":
 
                     else:
 
-                        if runbook["PR_ID"] not in st.session_state.approved_runbooks:
+                        if (
+                            runbook["PR_ID"]
+                            not in
+                            st.session_state.approved_runbooks
+                        ):
 
                             st.session_state.approved_runbooks.append(
                                 runbook["PR_ID"]
@@ -967,7 +1087,8 @@ elif page == "✅ Review Runbooks":
 
                         add_audit(
                             "Runbook Approved",
-                            f"{runbook['PR_ID']} approved by human reviewer"
+                            f"{runbook['PR_ID']} "
+                            "approved by human reviewer"
                         )
 
                         st.success(
@@ -996,7 +1117,8 @@ elif page == "✅ Review Runbooks":
 
                         add_audit(
                             "Runbook Rejected",
-                            f"{runbook['PR_ID']}: {reject_reason}"
+                            f"{runbook['PR_ID']}: "
+                            f"{reject_reason}"
                         )
 
                         st.warning(
@@ -1007,11 +1129,17 @@ elif page == "✅ Review Runbooks":
 
         st.divider()
 
-        st.subheader("Approved Runbooks")
+        st.subheader(
+            "Approved Runbooks"
+        )
 
-        for item in st.session_state.approved_runbooks:
+        for item in (
+            st.session_state.approved_runbooks
+        ):
 
-            st.success(item)
+            st.success(
+                item
+            )
 
 
 # ============================================================
@@ -1020,11 +1148,13 @@ elif page == "✅ Review Runbooks":
 
 elif page == "🔌 API Integration":
 
-    st.title("🔌 API Integration")
+    st.title(
+        "🔌 API Integration"
+    )
 
     st.write(
         """
-        In the production system, engineering systems such as
+        In a production system, engineering systems such as
         GitHub, GitLab, Jira or incident-management platforms
         could send maintenance evidence to this assistant.
 
@@ -1033,7 +1163,8 @@ elif page == "🔌 API Integration":
     )
 
     st.info(
-        "Prototype uses a Mock API. No real production system is modified."
+        "Prototype uses a Mock API. "
+        "No real production system is modified."
     )
 
     pr_id = st.selectbox(
@@ -1046,19 +1177,25 @@ elif page == "🔌 API Integration":
         type="primary"
     ):
 
-        payload = mock_api_send(pr_id)
+        payload = mock_api_send(
+            pr_id
+        )
 
         st.success(
             "Data successfully received by the Mock API."
         )
 
-        st.json(payload)
+        st.json(
+            payload
+        )
 
     if st.session_state.api_records:
 
         st.divider()
 
-        st.subheader("API Records")
+        st.subheader(
+            "API Records"
+        )
 
         st.write(
             f"Total API records: "
@@ -1072,7 +1209,9 @@ elif page == "🔌 API Integration":
 
 elif page == "🔄 Rollback Manager":
 
-    st.title("🔄 Rollback Manager")
+    st.title(
+        "🔄 Rollback Manager"
+    )
 
     st.warning(
         """
@@ -1090,6 +1229,7 @@ elif page == "🔄 Rollback Manager":
     )
 
     pr = get_pr(pr_id)
+
     diff = get_diff(pr_id)
 
     if pr is not None:
@@ -1104,7 +1244,9 @@ elif page == "🔄 Rollback Manager":
 
             with col1:
 
-                st.write("### Previous Version")
+                st.write(
+                    "### Previous Version"
+                )
 
                 st.code(
                     str(diff["Old_Code"])
@@ -1112,7 +1254,9 @@ elif page == "🔄 Rollback Manager":
 
             with col2:
 
-                st.write("### Current Version")
+                st.write(
+                    "### Current Version"
+                )
 
                 st.code(
                     str(diff["New_Code"])
@@ -1129,8 +1273,10 @@ elif page == "🔄 Rollback Manager":
         if high_impact:
 
             st.error(
-                "⚠️ High-impact change. "
-                "Human confirmation is required."
+                """
+                ⚠️ High-impact change.
+                Human confirmation is required.
+                """
             )
 
             rollback_confirmation = st.checkbox(
@@ -1166,9 +1312,11 @@ elif page == "🔄 Rollback Manager":
 
                 record = {
 
-                    "PR_ID": pr_id,
+                    "PR_ID":
+                        pr_id,
 
-                    "Reason": reason,
+                    "Reason":
+                        reason,
 
                     "Timestamp":
                         datetime.now().strftime(
@@ -1196,7 +1344,9 @@ elif page == "🔄 Rollback Manager":
 
         st.divider()
 
-        st.subheader("Rollback History")
+        st.subheader(
+            "Rollback History"
+        )
 
         st.dataframe(
             pd.DataFrame(
@@ -1212,7 +1362,9 @@ elif page == "🔄 Rollback Manager":
 
 elif page == "⚠️ Risk Checker":
 
-    st.title("⚠️ Risk Checker")
+    st.title(
+        "⚠️ Risk Checker"
+    )
 
     st.write(
         """
@@ -1223,7 +1375,7 @@ elif page == "⚠️ Risk Checker":
 
     st.write(
         """
-        **High-impact keywords include:**
+        High-impact keywords include:
 
         authentication, security, password, permission,
         database, payment, delete, production, credential, access
@@ -1285,61 +1437,87 @@ elif page == "⚠️ Risk Checker":
 
 elif page == "🧪 Edge Cases":
 
-    st.title("🧪 Edge & Failure Cases")
+    st.title(
+        "🧪 Edge & Failure Cases"
+    )
 
     st.write(
         """
-        The prototype intentionally demonstrates how the assistant
-        behaves when important information is missing or risky.
+        The prototype demonstrates how the assistant behaves
+        when important information is missing or risky.
         """
     )
 
     cases = [
 
         {
-            "Case": "Missing Incident",
-            "Condition": "Incident record does not exist",
+            "Case":
+                "Missing Incident",
+
+            "Condition":
+                "Incident record does not exist",
+
             "System Response":
                 "Show warning and mark root cause information incomplete."
         },
 
         {
-            "Case": "Pending Reviewer",
-            "Condition": "Reviewer has not approved the fix",
+            "Case":
+                "Pending Reviewer",
+
+            "Condition":
+                "Reviewer has not approved the fix",
+
             "System Response":
                 "Block runbook approval."
         },
 
         {
-            "Case": "Missing Code Diff",
-            "Condition": "No code change evidence is available",
+            "Case":
+                "Missing Code Diff",
+
+            "Condition":
+                "No code change evidence is available",
+
             "System Response":
                 "Mark runbook incomplete."
         },
 
         {
-            "Case": "High-Impact Change",
-            "Condition": "Security/authentication/database/production keyword detected",
+            "Case":
+                "High-Impact Change",
+
+            "Condition":
+                "Security/authentication/database/production keyword detected",
+
             "System Response":
                 "Require human confirmation."
         },
 
         {
-            "Case": "Rollback Without Reason",
-            "Condition": "User attempts rollback without explanation",
+            "Case":
+                "Rollback Without Reason",
+
+            "Condition":
+                "User attempts rollback without explanation",
+
             "System Response":
                 "Block rollback recording."
         }
     ]
 
-    edge_df = pd.DataFrame(cases)
+    edge_df = pd.DataFrame(
+        cases
+    )
 
     st.dataframe(
         edge_df,
         use_container_width=True
     )
 
-    st.subheader("Example Test")
+    st.subheader(
+        "Example Test"
+    )
 
     test_case = st.selectbox(
         "Choose Edge Case",
@@ -1389,7 +1567,9 @@ elif page == "🧪 Edge Cases":
 
 elif page == "📝 Audit Trail":
 
-    st.title("📝 Audit Trail")
+    st.title(
+        "📝 Audit Trail"
+    )
 
     st.write(
         """
@@ -1415,7 +1595,9 @@ elif page == "📝 Audit Trail":
             use_container_width=True
         )
 
-        st.subheader("Audit Summary")
+        st.subheader(
+            "Audit Summary"
+        )
 
         col1, col2, col3 = st.columns(3)
 
@@ -1453,7 +1635,9 @@ elif page == "📝 Audit Trail":
 
 elif page == "📊 Validation Dashboard":
 
-    st.title("📊 Validation Dashboard")
+    st.title(
+        "📊 Validation Dashboard"
+    )
 
     st.write(
         """
@@ -1462,7 +1646,9 @@ elif page == "📊 Validation Dashboard":
         """
     )
 
-    st.subheader("Add Experiment Result")
+    st.subheader(
+        "Add Experiment Result"
+    )
 
     col1, col2 = st.columns(2)
 
@@ -1511,6 +1697,13 @@ elif page == "📊 Validation Dashboard":
                 "Please enter a test case."
             )
 
+        elif assistant_time > baseline_time:
+
+            st.error(
+                "Assistant time should not be greater "
+                "than baseline time for this test."
+            )
+
         else:
 
             time_saved = (
@@ -1525,7 +1718,8 @@ elif page == "📊 Validation Dashboard":
 
             experiment = {
 
-                "Test Case": test_case,
+                "Test Case":
+                    test_case,
 
                 "Baseline Minutes":
                     baseline_time,
@@ -1571,7 +1765,9 @@ elif page == "📊 Validation Dashboard":
 
         st.divider()
 
-        st.subheader("📈 Experiment Metrics")
+        st.subheader(
+            "📈 Experiment Metrics"
+        )
 
         avg_baseline = results_df[
             "Baseline Minutes"
@@ -1637,7 +1833,9 @@ elif page == "📊 Validation Dashboard":
 
         target = 30
 
-        st.subheader("🎯 Target")
+        st.subheader(
+            "🎯 Target"
+        )
 
         if avg_reduction >= target:
 
@@ -1667,7 +1865,9 @@ elif page == "📊 Validation Dashboard":
         # Experiment table
         # ----------------------------------------------------
 
-        st.subheader("Experiment Results")
+        st.subheader(
+            "Experiment Results"
+        )
 
         st.dataframe(
             results_df,
@@ -1675,52 +1875,56 @@ elif page == "📊 Validation Dashboard":
         )
 
         # ----------------------------------------------------
-        # Chart
+        # Simple visual comparison
         # ----------------------------------------------------
 
-        st.subheader("⏱️ Baseline vs Assistant Time")
-
-        chart_df = results_df[
-            [
-                "Test Case",
-                "Baseline Minutes",
-                "Assistant Minutes"
-            ]
-        ].set_index("Test Case")
-
-        fig, ax = plt.subplots()
-
-        chart_df.plot(
-            kind="bar",
-            ax=ax
+        st.subheader(
+            "⏱️ Time Comparison"
         )
 
-        ax.set_ylabel(
-            "Time (minutes)"
-        )
+        for _, row in results_df.iterrows():
 
-        ax.set_xlabel(
-            "Test Case"
-        )
+            st.write(
+                f"**{row['Test Case']}**"
+            )
 
-        ax.set_title(
-            "Maintenance Fix Time Comparison"
-        )
+            st.write(
+                f"Baseline: "
+                f"{row['Baseline Minutes']:.1f} minutes"
+            )
 
-        plt.xticks(
-            rotation=45,
-            ha="right"
-        )
+            st.progress(
+                min(
+                    int(
+                        (
+                            row["Assistant Minutes"]
+                            / row["Baseline Minutes"]
+                        ) * 100
+                    ),
+                    100
+                )
+            )
 
-        plt.tight_layout()
+            st.write(
+                f"Assistant: "
+                f"{row['Assistant Minutes']:.1f} minutes"
+            )
 
-        st.pyplot(fig)
+            st.write(
+                f"Time saved: "
+                f"{row['Time Saved']:.1f} minutes "
+                f"({row['Reduction %']:.1f}%)"
+            )
+
+            st.divider()
 
         # ----------------------------------------------------
         # Error Analysis
         # ----------------------------------------------------
 
-        st.subheader("🔍 Error Analysis")
+        st.subheader(
+            "🔍 Error Analysis"
+        )
 
         failures = results_df[
             results_df["Result"] != "Success"
