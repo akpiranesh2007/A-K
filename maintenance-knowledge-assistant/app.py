@@ -11,7 +11,8 @@ from datetime import datetime
 st.set_page_config(
     page_title="Maintenance Knowledge Assistant",
     page_icon="🛠️",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 
@@ -23,56 +24,331 @@ st.markdown(
     """
     <style>
 
-    .main {
-        background-color: #0f0f23;
-    }
+    /* ======================================================
+       GLOBAL APPLICATION
+       ====================================================== */
 
     .stApp {
-        background-color: #0f0f23;
+        background-color: #0b1020 !important;
     }
 
-    h1, h2, h3 {
-        color: #67e8f9;
+    .main {
+        background-color: #0b1020 !important;
     }
+
+    .block-container {
+        padding-top: 2rem;
+        padding-bottom: 3rem;
+    }
+
+
+    /* ======================================================
+       MAIN TEXT
+       ====================================================== */
+
+    .stApp p {
+        color: #d1d5db !important;
+    }
+
+    .stApp li {
+        color: #d1d5db !important;
+    }
+
+    .stApp label {
+        color: #dbeafe !important;
+    }
+
+
+    /* ======================================================
+       HEADINGS
+       ====================================================== */
+
+    .stApp h1 {
+        color: #67e8f9 !important;
+        font-weight: 700 !important;
+    }
+
+    .stApp h2 {
+        color: #7dd3fc !important;
+        font-weight: 650 !important;
+    }
+
+    .stApp h3 {
+        color: #a5f3fc !important;
+        font-weight: 600 !important;
+    }
+
+
+    /* ======================================================
+       SIDEBAR
+       ====================================================== */
+
+    section[data-testid="stSidebar"] {
+        background-color: #111827 !important;
+        border-right: 1px solid #334155 !important;
+    }
+
+    section[data-testid="stSidebar"] > div {
+        background-color: #111827 !important;
+    }
+
+    section[data-testid="stSidebar"] h1 {
+        color: #67e8f9 !important;
+    }
+
+    section[data-testid="stSidebar"] h2 {
+        color: #7dd3fc !important;
+    }
+
+    section[data-testid="stSidebar"] h3 {
+        color: #a5f3fc !important;
+    }
+
+    section[data-testid="stSidebar"] p {
+        color: #94a3b8 !important;
+    }
+
+    section[data-testid="stSidebar"] label {
+        color: #e2e8f0 !important;
+    }
+
+    section[data-testid="stSidebar"] span {
+        color: #e2e8f0 !important;
+    }
+
+    section[data-testid="stSidebar"] [data-testid="stRadio"] label {
+        color: #e2e8f0 !important;
+    }
+
+
+    /* ======================================================
+       TITLE CARD
+       ====================================================== */
 
     .title-box {
-        padding: 25px;
-        border-radius: 15px;
-        background-color: #1e1b4b;
+        padding: 30px;
+        border-radius: 18px;
+        background: linear-gradient(
+            135deg,
+            #171554,
+            #1e1b4b
+        );
         border: 1px solid #4f46e5;
-        margin-bottom: 20px;
+        margin-bottom: 25px;
+        box-shadow: 0 10px 30px rgba(0, 0, 0, 0.30);
     }
+
+    .title-box h1 {
+        color: #67e8f9 !important;
+        margin-bottom: 10px;
+    }
+
+    .title-box p {
+        color: #cbd5e1 !important;
+        font-size: 16px;
+    }
+
+
+    /* ======================================================
+       INFORMATION CARD
+       ====================================================== */
 
     .info-box {
-        padding: 18px;
-        border-radius: 12px;
+        padding: 20px;
+        border-radius: 14px;
         background-color: #172554;
         border: 1px solid #2563eb;
-        margin-bottom: 15px;
+        margin-bottom: 18px;
     }
 
-    .success-box {
-        padding: 18px;
-        border-radius: 12px;
-        background-color: #052e16;
-        border: 1px solid #16a34a;
-        margin-bottom: 15px;
+    .info-box b {
+        color: #67e8f9 !important;
     }
 
-    .warning-box {
-        padding: 18px;
-        border-radius: 12px;
-        background-color: #422006;
-        border: 1px solid #f59e0b;
-        margin-bottom: 15px;
+    .info-box p {
+        color: #dbeafe !important;
     }
 
-    .danger-box {
-        padding: 18px;
-        border-radius: 12px;
-        background-color: #450a0a;
-        border: 1px solid #dc2626;
-        margin-bottom: 15px;
+
+    /* ======================================================
+       METRIC CARDS
+       ====================================================== */
+
+    [data-testid="stMetric"] {
+        background-color: #111827 !important;
+        border: 1px solid #334155 !important;
+        padding: 18px !important;
+        border-radius: 14px !important;
+    }
+
+    [data-testid="stMetricLabel"] {
+        color: #94a3b8 !important;
+    }
+
+    [data-testid="stMetricValue"] {
+        color: #67e8f9 !important;
+    }
+
+    [data-testid="stMetricDelta"] {
+        color: #cbd5e1 !important;
+    }
+
+
+    /* ======================================================
+       TEXT INPUT
+       ====================================================== */
+
+    .stTextInput input {
+        background-color: #111827 !important;
+        color: #f8fafc !important;
+        border: 1px solid #475569 !important;
+        border-radius: 8px !important;
+    }
+
+    .stTextInput input:focus {
+        border-color: #67e8f9 !important;
+        box-shadow: 0 0 0 1px #67e8f9 !important;
+    }
+
+
+    /* ======================================================
+       TEXT AREA
+       ====================================================== */
+
+    .stTextArea textarea {
+        background-color: #111827 !important;
+        color: #f8fafc !important;
+        border: 1px solid #475569 !important;
+        border-radius: 8px !important;
+    }
+
+    .stTextArea textarea:focus {
+        border-color: #67e8f9 !important;
+        box-shadow: 0 0 0 1px #67e8f9 !important;
+    }
+
+
+    /* ======================================================
+       NUMBER INPUT
+       ====================================================== */
+
+    .stNumberInput input {
+        background-color: #111827 !important;
+        color: #f8fafc !important;
+        border: 1px solid #475569 !important;
+        border-radius: 8px !important;
+    }
+
+
+    /* ======================================================
+       SELECT BOX
+       ====================================================== */
+
+    div[data-baseweb="select"] > div {
+        background-color: #111827 !important;
+        color: #f8fafc !important;
+        border-color: #475569 !important;
+    }
+
+    div[data-baseweb="select"] span {
+        color: #f8fafc !important;
+    }
+
+
+    /* ======================================================
+       BUTTONS
+       ====================================================== */
+
+    .stButton button {
+        background-color: #4f46e5 !important;
+        color: #ffffff !important;
+        border: 1px solid #6366f1 !important;
+        border-radius: 8px !important;
+        font-weight: 600 !important;
+    }
+
+    .stButton button:hover {
+        background-color: #6366f1 !important;
+        color: #ffffff !important;
+        border-color: #818cf8 !important;
+    }
+
+
+    /* ======================================================
+       CHECKBOX
+       ====================================================== */
+
+    .stCheckbox label {
+        color: #e2e8f0 !important;
+    }
+
+
+    /* ======================================================
+       RADIO
+       ====================================================== */
+
+    .stRadio label {
+        color: #e2e8f0 !important;
+    }
+
+
+    /* ======================================================
+       DATAFRAME
+       ====================================================== */
+
+    [data-testid="stDataFrame"] {
+        border: 1px solid #334155 !important;
+        border-radius: 10px !important;
+    }
+
+
+    /* ======================================================
+       CODE BLOCK
+       ====================================================== */
+
+    [data-testid="stCodeBlock"] {
+        border: 1px solid #334155 !important;
+        border-radius: 10px !important;
+    }
+
+
+    /* ======================================================
+       DIVIDER
+       ====================================================== */
+
+    hr {
+        border-color: #334155 !important;
+    }
+
+
+    /* ======================================================
+       ALERTS
+       ====================================================== */
+
+    [data-testid="stAlert"] {
+        border-radius: 10px !important;
+    }
+
+
+    /* ======================================================
+       SCROLLBAR
+       ====================================================== */
+
+    ::-webkit-scrollbar {
+        width: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+        background: #0b1020;
+    }
+
+    ::-webkit-scrollbar-thumb {
+        background: #334155;
+        border-radius: 10px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+        background: #475569;
     }
 
     </style>
@@ -82,7 +358,7 @@ st.markdown(
 
 
 # ============================================================
-# PATHS
+# PROJECT PATHS
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -131,14 +407,20 @@ try:
 
 except Exception as e:
 
-    st.error("Unable to load the dataset.")
+    st.error("Unable to load the project data.")
 
     st.code(str(e))
 
     st.info(
-        "Make sure your data folder contains: "
-        "pull_requests.csv, incidents.csv, "
-        "code_diffs.csv and reviews.csv."
+        """
+        Make sure your GitHub repository has this structure:
+
+        data/
+        ├── pull_requests.csv
+        ├── incidents.csv
+        ├── code_diffs.csv
+        └── reviews.csv
+        """
     )
 
     st.stop()
@@ -175,11 +457,16 @@ def add_audit(action, details):
 
     st.session_state.audit_log.append(
         {
-            "Timestamp": datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-            "Action": action,
-            "Details": details
+            "Timestamp":
+                datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+
+            "Action":
+                action,
+
+            "Details":
+                details
         }
     )
 
@@ -273,7 +560,7 @@ def generate_runbook(pr_id):
         return None
 
     # --------------------------------------------------------
-    # Confidence calculation
+    # Confidence
     # --------------------------------------------------------
 
     confidence = 40
@@ -286,10 +573,16 @@ def generate_runbook(pr_id):
 
     if review is not None:
 
-        if str(review["Decision"]).lower() == "approved":
+        if str(
+            review["Decision"]
+        ).lower() == "approved":
+
             confidence += 30
 
-    confidence = min(confidence, 100)
+    confidence = min(
+        confidence,
+        100
+    )
 
     # --------------------------------------------------------
     # Reviewer information
@@ -303,11 +596,21 @@ def generate_runbook(pr_id):
             "Reviewer information unavailable."
         )
 
+        reviewer_name = "Unavailable"
+
     else:
 
-        reviewer_status = review["Decision"]
+        reviewer_status = (
+            str(review["Decision"])
+        )
 
-        verification = review["Comment"]
+        verification = (
+            str(review["Comment"])
+        )
+
+        reviewer_name = (
+            str(review["Reviewer"])
+        )
 
     # --------------------------------------------------------
     # Incident information
@@ -315,7 +618,9 @@ def generate_runbook(pr_id):
 
     if incident is None:
 
-        problem = pr["Description"]
+        problem = str(
+            pr["Description"]
+        )
 
         root_cause = (
             "Incident information unavailable."
@@ -327,16 +632,20 @@ def generate_runbook(pr_id):
 
     else:
 
-        problem = incident["Problem"]
+        problem = str(
+            incident["Problem"]
+        )
 
-        root_cause = incident["Discussion"]
+        root_cause = str(
+            incident["Discussion"]
+        )
 
-        incident_resolution = (
+        incident_resolution = str(
             incident["Final_Resolution"]
         )
 
     # --------------------------------------------------------
-    # Code diff information
+    # Code diff
     # --------------------------------------------------------
 
     if diff is None:
@@ -351,14 +660,20 @@ def generate_runbook(pr_id):
 
     else:
 
-        changed_file = diff["File"]
+        changed_file = str(
+            diff["File"]
+        )
 
-        old_code = diff["Old_Code"]
+        old_code = str(
+            diff["Old_Code"]
+        )
 
-        new_code = diff["New_Code"]
+        new_code = str(
+            diff["New_Code"]
+        )
 
     # --------------------------------------------------------
-    # Verification status
+    # Verification
     # --------------------------------------------------------
 
     if incident is None or diff is None:
@@ -369,7 +684,9 @@ def generate_runbook(pr_id):
 
         verification_status = "Pending Review"
 
-    elif str(review["Decision"]).lower() != "approved":
+    elif str(
+        review["Decision"]
+    ).lower() != "approved":
 
         verification_status = "Pending Review"
 
@@ -378,7 +695,7 @@ def generate_runbook(pr_id):
         verification_status = "Verified"
 
     # --------------------------------------------------------
-    # Risk detection
+    # Risk
     # --------------------------------------------------------
 
     combined_text = (
@@ -394,20 +711,25 @@ def generate_runbook(pr_id):
     )
 
     # --------------------------------------------------------
-    # Runbook
+    # Final Runbook
     # --------------------------------------------------------
 
     runbook = {
 
-        "PR_ID": pr_id,
+        "PR_ID":
+            pr_id,
 
-        "Title": pr["Title"],
+        "Title":
+            str(pr["Title"]),
 
-        "Problem": problem,
+        "Problem":
+            problem,
 
-        "Root Cause": root_cause,
+        "Root Cause":
+            root_cause,
 
-        "Solution": pr["Resolution"],
+        "Solution":
+            str(pr["Resolution"]),
 
         "Incident Resolution":
             incident_resolution,
@@ -422,11 +744,7 @@ def generate_runbook(pr_id):
             new_code,
 
         "Reviewer":
-            (
-                review["Reviewer"]
-                if review is not None
-                else "Unavailable"
-            ),
+            reviewer_name,
 
         "Reviewer Status":
             reviewer_status,
@@ -527,6 +845,8 @@ st.sidebar.caption(
     "Knowledge capture and verified runbook prototype"
 )
 
+st.sidebar.divider()
+
 page = st.sidebar.radio(
 
     "Navigation",
@@ -544,6 +864,12 @@ page = st.sidebar.radio(
         "📝 Audit Trail",
         "📊 Validation Dashboard"
     ]
+)
+
+st.sidebar.divider()
+
+st.sidebar.caption(
+    "Prototype • Synthetic Data • Human-in-the-loop"
 )
 
 
@@ -644,10 +970,12 @@ Validation
         """
         <div class="info-box">
 
-        <b>Main Success Metric</b><br><br>
+        <b>Main Success Metric</b>
 
+        <p>
         Reduce the time required for a new engineer
         to repeat a previously solved maintenance fix.
+        </p>
 
         </div>
         """,
@@ -731,12 +1059,16 @@ elif page == "📋 Pull Requests":
 
         with col3:
 
-            if is_high_impact(
+            combined_text = (
                 str(pr["Title"])
                 + " "
                 + str(pr["Description"])
                 + " "
                 + str(pr["Resolution"])
+            )
+
+            if is_high_impact(
+                combined_text
             ):
 
                 st.warning(
@@ -774,7 +1106,9 @@ elif page == "🚨 Incidents":
         incidents["PR_ID"].tolist()
     )
 
-    incident = get_incident(pr_id)
+    incident = get_incident(
+        pr_id
+    )
 
     if incident is not None:
 
@@ -813,13 +1147,20 @@ elif page == "📘 Generate Runbook":
         "📘 Generate Maintenance Runbook"
     )
 
+    st.write(
+        """
+        Select a completed pull request. The assistant combines
+        the PR, incident, code diff and reviewer evidence.
+        """
+    )
+
     pr_id = st.selectbox(
-        "Select completed Pull Request",
+        "Select Pull Request",
         pull_requests["PR_ID"].tolist()
     )
 
     if st.button(
-        "Generate Runbook",
+        "🚀 Generate Runbook",
         type="primary"
     ):
 
@@ -874,7 +1215,7 @@ elif page == "📘 Generate Runbook":
                 "### Root Cause"
             )
 
-            st.write(
+            st.info(
                 runbook["Root Cause"]
             )
 
@@ -889,15 +1230,35 @@ elif page == "📘 Generate Runbook":
         with col2:
 
             st.write(
+                "### Reviewer"
+            )
+
+            st.write(
+                runbook["Reviewer"]
+            )
+
+            st.write(
+                "### Reviewer Status"
+            )
+
+            if (
+                runbook["Reviewer Status"]
+                .lower()
+                == "approved"
+            ):
+
+                st.success(
+                    runbook["Reviewer Status"]
+                )
+
+            else:
+
+                st.warning(
+                    runbook["Reviewer Status"]
+                )
+
+            st.write(
                 "### Verification"
-            )
-
-            st.write(
-                runbook["Verification"]
-            )
-
-            st.write(
-                "### Verification Status"
             )
 
             if (
@@ -906,14 +1267,22 @@ elif page == "📘 Generate Runbook":
             ):
 
                 st.success(
-                    runbook["Verification Status"]
+                    runbook["Verification"]
                 )
 
             else:
 
                 st.warning(
-                    runbook["Verification Status"]
+                    runbook["Verification"]
                 )
+
+            st.write(
+                "### Verification Status"
+            )
+
+            st.write(
+                runbook["Verification Status"]
+            )
 
             st.write(
                 "### Confidence"
@@ -934,7 +1303,7 @@ elif page == "📘 Generate Runbook":
         )
 
         st.write(
-            f"**File:** "
+            f"**Changed File:** "
             f"{runbook['Changed File']}"
         )
 
@@ -947,7 +1316,7 @@ elif page == "📘 Generate Runbook":
             )
 
             st.code(
-                str(runbook["Old Code"])
+                runbook["Old Code"]
             )
 
         with col2:
@@ -957,15 +1326,16 @@ elif page == "📘 Generate Runbook":
             )
 
             st.code(
-                str(runbook["New Code"])
+                runbook["New Code"]
             )
 
         if runbook["High Impact"]:
 
-            st.warning(
+            st.error(
                 """
-                ⚠️ This runbook contains a high-impact
-                change. Human confirmation is required
+                🚨 HIGH-IMPACT CHANGE
+
+                Human confirmation is required
                 before approval.
                 """
             )
@@ -973,7 +1343,7 @@ elif page == "📘 Generate Runbook":
         else:
 
             st.info(
-                "This runbook is classified as normal impact."
+                "This is classified as a normal-impact change."
             )
 
 
@@ -1007,13 +1377,13 @@ elif page == "✅ Review Runbooks":
             )
 
             st.write(
-                f"**Confidence:** "
-                f"{runbook['Confidence']}%"
+                f"Confidence: "
+                f"**{runbook['Confidence']}%**"
             )
 
             st.write(
-                f"**Verification:** "
-                f"{runbook['Verification Status']}"
+                f"Verification: "
+                f"**{runbook['Verification Status']}**"
             )
 
             if (
@@ -1022,25 +1392,24 @@ elif page == "✅ Review Runbooks":
             ):
 
                 st.error(
-                    "❌ Approval blocked: "
-                    "Code diff is missing."
+                    "❌ Approval blocked: Code diff is missing."
                 )
 
                 continue
 
             if (
-                runbook["Reviewer Status"].lower()
+                runbook["Reviewer Status"]
+                .lower()
                 != "approved"
             ):
 
                 st.warning(
-                    "⏳ Approval blocked: "
-                    "Reviewer approval is required."
+                    "⏳ Approval blocked: Reviewer approval is required."
                 )
 
                 continue
 
-            confirmation = False
+            confirmation = True
 
             if runbook["High Impact"]:
 
@@ -1049,21 +1418,16 @@ elif page == "✅ Review Runbooks":
                 )
 
                 confirmation = st.checkbox(
-                    "I confirm that this high-impact "
-                    "runbook has been manually reviewed.",
+                    "I confirm that this high-impact runbook has been manually reviewed.",
                     key=f"confirm_{index}"
                 )
-
-            else:
-
-                confirmation = True
 
             col1, col2 = st.columns(2)
 
             with col1:
 
                 if st.button(
-                    "✅ Approve",
+                    "✅ Approve Runbook",
                     key=f"approve_{index}"
                 ):
 
@@ -1087,8 +1451,7 @@ elif page == "✅ Review Runbooks":
 
                         add_audit(
                             "Runbook Approved",
-                            f"{runbook['PR_ID']} "
-                            "approved by human reviewer"
+                            f"{runbook['PR_ID']} approved by human reviewer"
                         )
 
                         st.success(
@@ -1103,7 +1466,7 @@ elif page == "✅ Review Runbooks":
                 )
 
                 if st.button(
-                    "❌ Reject",
+                    "❌ Reject Runbook",
                     key=f"reject_{index}"
                 ):
 
@@ -1117,8 +1480,7 @@ elif page == "✅ Review Runbooks":
 
                         add_audit(
                             "Runbook Rejected",
-                            f"{runbook['PR_ID']}: "
-                            f"{reject_reason}"
+                            f"{runbook['PR_ID']}: {reject_reason}"
                         )
 
                         st.warning(
@@ -1130,7 +1492,7 @@ elif page == "✅ Review Runbooks":
         st.divider()
 
         st.subheader(
-            "Approved Runbooks"
+            "✅ Approved Runbooks"
         )
 
         for item in (
@@ -1154,21 +1516,19 @@ elif page == "🔌 API Integration":
 
     st.write(
         """
-        In a production system, engineering systems such as
-        GitHub, GitLab, Jira or incident-management platforms
-        could send maintenance evidence to this assistant.
+        A production version could connect with GitHub, GitLab,
+        Jira or incident-management systems.
 
-        For this prototype, the API is simulated.
+        This prototype uses a Mock API to demonstrate the integration.
         """
     )
 
     st.info(
-        "Prototype uses a Mock API. "
-        "No real production system is modified."
+        "🔌 Mock API — no production system is modified."
     )
 
     pr_id = st.selectbox(
-        "Select PR to send through Mock API",
+        "Select PR",
         pull_requests["PR_ID"].tolist()
     )
 
@@ -1182,7 +1542,7 @@ elif page == "🔌 API Integration":
         )
 
         st.success(
-            "Data successfully received by the Mock API."
+            "Data successfully received by Mock API."
         )
 
         st.json(
@@ -1194,12 +1554,14 @@ elif page == "🔌 API Integration":
         st.divider()
 
         st.subheader(
-            "API Records"
+            "API Activity"
         )
 
-        st.write(
-            f"Total API records: "
-            f"{len(st.session_state.api_records)}"
+        st.metric(
+            "API Calls",
+            len(
+                st.session_state.api_records
+            )
         )
 
 
@@ -1217,9 +1579,8 @@ elif page == "🔄 Rollback Manager":
         """
         Prototype simulation only.
 
-        This feature does NOT change production code.
-        It records the rollback path that would be used
-        if an approved change causes a problem.
+        This feature does NOT modify production code.
+        It records the rollback path and reason.
         """
     )
 
@@ -1262,7 +1623,7 @@ elif page == "🔄 Rollback Manager":
                     str(diff["New_Code"])
                 )
 
-        high_impact = is_high_impact(
+        combined_text = (
             str(pr["Title"])
             + " "
             + str(pr["Description"])
@@ -1270,13 +1631,14 @@ elif page == "🔄 Rollback Manager":
             + str(pr["Resolution"])
         )
 
+        high_impact = is_high_impact(
+            combined_text
+        )
+
         if high_impact:
 
             st.error(
-                """
-                ⚠️ High-impact change.
-                Human confirmation is required.
-                """
+                "🚨 High-impact change. Human confirmation required."
             )
 
             rollback_confirmation = st.checkbox(
@@ -1288,7 +1650,8 @@ elif page == "🔄 Rollback Manager":
             rollback_confirmation = True
 
         reason = st.text_area(
-            "Rollback Reason"
+            "Rollback Reason",
+            placeholder="Explain why the rollback is required..."
         )
 
         if st.button(
@@ -1345,7 +1708,7 @@ elif page == "🔄 Rollback Manager":
         st.divider()
 
         st.subheader(
-            "Rollback History"
+            "🔄 Rollback History"
         )
 
         st.dataframe(
@@ -1368,17 +1731,18 @@ elif page == "⚠️ Risk Checker":
 
     st.write(
         """
-        The prototype uses simple rules to identify potentially
-        high-impact maintenance changes.
+        The prototype uses rule-based detection to identify
+        potentially high-impact maintenance changes.
         """
     )
 
-    st.write(
+    st.info(
         """
-        High-impact keywords include:
+        High-impact keywords:
 
-        authentication, security, password, permission,
-        database, payment, delete, production, credential, access
+        authentication • security • password • permission •
+        database • payment • delete • production •
+        credential • access
         """
     )
 
@@ -1404,30 +1768,30 @@ elif page == "⚠️ Risk Checker":
         )
 
         st.subheader(
-            f"Risk Result: {pr_id}"
+            f"Risk Result — {pr_id}"
         )
 
         if high_impact:
 
             st.error(
-                "🚨 HIGH IMPACT CHANGE"
+                "🚨 HIGH-IMPACT CHANGE"
             )
 
             st.write(
                 """
                 Human confirmation is required before
-                the change can be treated as approved knowledge.
+                this change can become trusted maintenance knowledge.
                 """
             )
 
         else:
 
             st.success(
-                "✅ NORMAL IMPACT CHANGE"
+                "✅ NORMAL-IMPACT CHANGE"
             )
 
             st.write(
-                "Standard review process can be followed."
+                "Standard human review can be followed."
             )
 
 
@@ -1443,8 +1807,9 @@ elif page == "🧪 Edge Cases":
 
     st.write(
         """
-        The prototype demonstrates how the assistant behaves
-        when important information is missing or risky.
+        These cases demonstrate how the assistant behaves when
+        evidence is missing, review is incomplete, or a risky
+        action is detected.
         """
     )
 
@@ -1458,7 +1823,7 @@ elif page == "🧪 Edge Cases":
                 "Incident record does not exist",
 
             "System Response":
-                "Show warning and mark root cause information incomplete."
+                "Show warning and mark root-cause evidence incomplete."
         },
 
         {
@@ -1499,7 +1864,7 @@ elif page == "🧪 Edge Cases":
                 "Rollback Without Reason",
 
             "Condition":
-                "User attempts rollback without explanation",
+                "Rollback is attempted without explanation",
 
             "System Response":
                 "Block rollback recording."
@@ -1516,7 +1881,7 @@ elif page == "🧪 Edge Cases":
     )
 
     st.subheader(
-        "Example Test"
+        "🧪 Test an Edge Case"
     )
 
     test_case = st.selectbox(
@@ -1573,8 +1938,9 @@ elif page == "📝 Audit Trail":
 
     st.write(
         """
-        Important assistant actions are recorded so that the system
-        can show what happened, when it happened, and why.
+        The audit trail records important system actions,
+        including runbook generation, approval, rejection,
+        API reception and rollback.
         """
     )
 
@@ -1596,7 +1962,7 @@ elif page == "📝 Audit Trail":
         )
 
         st.subheader(
-            "Audit Summary"
+            "📊 Audit Summary"
         )
 
         col1, col2, col3 = st.columns(3)
@@ -1641,13 +2007,13 @@ elif page == "📊 Validation Dashboard":
 
     st.write(
         """
-        This experiment measures whether the assistant reduces
-        the time required for a new engineer to repeat a known fix.
+        Measure whether the assistant reduces the time required
+        for a new engineer to repeat a known maintenance fix.
         """
     )
 
     st.subheader(
-        "Add Experiment Result"
+        "➕ Add Experiment Result"
     )
 
     col1, col2 = st.columns(2)
@@ -1683,7 +2049,8 @@ elif page == "📊 Validation Dashboard":
         )
 
     observation = st.text_area(
-        "Observation / Error Analysis"
+        "Observation / Error Analysis",
+        placeholder="Describe what happened during the test..."
     )
 
     if st.button(
@@ -1700,8 +2067,7 @@ elif page == "📊 Validation Dashboard":
         elif assistant_time > baseline_time:
 
             st.error(
-                "Assistant time should not be greater "
-                "than baseline time for this test."
+                "Assistant time cannot be greater than baseline time."
             )
 
         else:
@@ -1750,12 +2116,12 @@ elif page == "📊 Validation Dashboard":
             )
 
             st.success(
-                "Validation result added."
+                "Validation result added successfully."
             )
 
-    # --------------------------------------------------------
-    # Metrics
-    # --------------------------------------------------------
+    # ========================================================
+    # DISPLAY VALIDATION RESULTS
+    # ========================================================
 
     if st.session_state.experiment_results:
 
@@ -1828,7 +2194,7 @@ elif page == "📊 Validation Dashboard":
             )
 
         # ----------------------------------------------------
-        # Target
+        # TARGET
         # ----------------------------------------------------
 
         target = 30
@@ -1862,11 +2228,11 @@ elif page == "📊 Validation Dashboard":
             )
 
         # ----------------------------------------------------
-        # Experiment table
+        # RESULTS TABLE
         # ----------------------------------------------------
 
         st.subheader(
-            "Experiment Results"
+            "📋 Experiment Results"
         )
 
         st.dataframe(
@@ -1875,7 +2241,7 @@ elif page == "📊 Validation Dashboard":
         )
 
         # ----------------------------------------------------
-        # Simple visual comparison
+        # SIMPLE VISUAL COMPARISON
         # ----------------------------------------------------
 
         st.subheader(
@@ -1888,26 +2254,35 @@ elif page == "📊 Validation Dashboard":
                 f"**{row['Test Case']}**"
             )
 
-            st.write(
-                f"Baseline: "
-                f"{row['Baseline Minutes']:.1f} minutes"
+            baseline = float(
+                row["Baseline Minutes"]
             )
 
-            st.progress(
+            assistant = float(
+                row["Assistant Minutes"]
+            )
+
+            percentage = int(
                 min(
-                    int(
-                        (
-                            row["Assistant Minutes"]
-                            / row["Baseline Minutes"]
-                        ) * 100
-                    ),
+                    (assistant / baseline) * 100,
                     100
                 )
             )
 
             st.write(
-                f"Assistant: "
-                f"{row['Assistant Minutes']:.1f} minutes"
+                f"Baseline: {baseline:.1f} minutes"
+            )
+
+            st.progress(
+                100
+            )
+
+            st.write(
+                f"Assistant: {assistant:.1f} minutes"
+            )
+
+            st.progress(
+                percentage
             )
 
             st.write(
@@ -1919,7 +2294,7 @@ elif page == "📊 Validation Dashboard":
             st.divider()
 
         # ----------------------------------------------------
-        # Error Analysis
+        # ERROR ANALYSIS
         # ----------------------------------------------------
 
         st.subheader(
@@ -1957,20 +2332,10 @@ elif page == "📊 Validation Dashboard":
     else:
 
         st.info(
-            "Add experiment results to display metrics."
+            "Add experiment results to display validation metrics."
         )
 
 
 # ============================================================
-# FOOTER
+# END
 # ============================================================
-
-st.sidebar.divider()
-
-st.sidebar.caption(
-    "Maintenance Knowledge Assistant"
-)
-
-st.sidebar.caption(
-    "Prototype • Synthetic Data • Human-in-the-loop"
-)
