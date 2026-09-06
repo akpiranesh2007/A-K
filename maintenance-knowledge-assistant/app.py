@@ -26,23 +26,44 @@ DATA_DIR = BASE_DIR / "data"
 @st.cache_data
 def load_data():
 
-    pull_requests = pd.read_csv(DATA_DIR / "pull_requests.csv")
-    incidents = pd.read_csv(DATA_DIR / "incidents.csv")
-    code_diffs = pd.read_csv(DATA_DIR / "code_diffs.csv")
-    reviews = pd.read_csv(DATA_DIR / "reviews.csv")
+    pull_requests = pd.read_csv(
+        DATA_DIR / "pull_requests.csv"
+    )
 
-    return pull_requests, incidents, code_diffs, reviews
+    incidents = pd.read_csv(
+        DATA_DIR / "incidents.csv"
+    )
+
+    code_diffs = pd.read_csv(
+        DATA_DIR / "code_diffs.csv"
+    )
+
+    reviews = pd.read_csv(
+        DATA_DIR / "reviews.csv"
+    )
+
+    return (
+        pull_requests,
+        incidents,
+        code_diffs,
+        reviews
+    )
 
 
 try:
 
-    pull_requests, incidents, code_diffs, reviews = load_data()
+    (
+        pull_requests,
+        incidents,
+        code_diffs,
+        reviews
+    ) = load_data()
 
 except Exception as e:
 
-    st.error("❌ Unable to load the data files.")
-
-    st.write("Expected folder structure:")
+    st.error(
+        "❌ Unable to load the data files."
+    )
 
     st.code("""
 maintenance-knowledge-assistant/
@@ -56,7 +77,7 @@ maintenance-knowledge-assistant/
     ├── incidents.csv
     ├── code_diffs.csv
     └── reviews.csv
-    """)
+""")
 
     st.error(f"Error: {e}")
 
@@ -79,6 +100,9 @@ if "api_records" not in st.session_state:
 if "rollback_log" not in st.session_state:
     st.session_state.rollback_log = []
 
+if "experiment_results" not in st.session_state:
+    st.session_state.experiment_results = []
+
 
 # ============================================================
 # AUDIT FUNCTION
@@ -88,15 +112,19 @@ def add_audit(action, pr_id, details):
 
     st.session_state.audit_log.append({
 
-        "Timestamp": datetime.now().strftime(
-            "%Y-%m-%d %H:%M:%S"
-        ),
+        "Timestamp":
+            datetime.now().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            ),
 
-        "Action": action,
+        "Action":
+            action,
 
-        "PR_ID": pr_id,
+        "PR_ID":
+            pr_id,
 
-        "Details": details
+        "Details":
+            details
     })
 
 
@@ -137,13 +165,11 @@ def generate_runbook(pr_id):
         pull_requests["PR_ID"] == pr_id
     ]
 
-    # EDGE CASE 1:
-    # PR does not exist
-
     if len(pr_rows) == 0:
 
         return {
-            "error": "Pull Request not found."
+            "error":
+                "Pull Request not found."
         }
 
     pr = pr_rows.iloc[0]
@@ -161,10 +187,9 @@ def generate_runbook(pr_id):
     ]
 
 
-    # ========================================================
-    # EDGE CASE 2:
-    # MISSING INCIDENT
-    # ========================================================
+    # --------------------------------------------------------
+    # INCIDENT CHECK
+    # --------------------------------------------------------
 
     if len(incident_rows) == 0:
 
@@ -189,10 +214,9 @@ def generate_runbook(pr_id):
         incident_available = True
 
 
-    # ========================================================
-    # EDGE CASE 3:
-    # MISSING CODE DIFF
-    # ========================================================
+    # --------------------------------------------------------
+    # CODE DIFF CHECK
+    # --------------------------------------------------------
 
     if len(diff_rows) == 0:
 
@@ -217,15 +241,17 @@ def generate_runbook(pr_id):
         diff_available = True
 
 
-    # ========================================================
-    # REVIEW STATUS
-    # ========================================================
+    # --------------------------------------------------------
+    # REVIEW CHECK
+    # --------------------------------------------------------
 
     if len(review_rows) == 0:
 
         reviewer_status = "Unknown"
 
-        verification = "Reviewer information unavailable."
+        verification = (
+            "Reviewer information unavailable."
+        )
 
     else:
 
@@ -236,22 +262,19 @@ def generate_runbook(pr_id):
         verification = review["Comment"]
 
 
-    # ========================================================
-    # CONFIDENCE SCORE
-    # ========================================================
+    # --------------------------------------------------------
+    # CONFIDENCE
+    # --------------------------------------------------------
 
     confidence = 40
 
     if incident_available:
-
         confidence += 15
 
     if diff_available:
-
         confidence += 15
 
     if reviewer_status == "Approved":
-
         confidence += 30
 
     confidence = min(
@@ -260,9 +283,9 @@ def generate_runbook(pr_id):
     )
 
 
-    # ========================================================
+    # --------------------------------------------------------
     # VERIFICATION STATUS
-    # ========================================================
+    # --------------------------------------------------------
 
     if not incident_available:
 
@@ -287,10 +310,6 @@ def generate_runbook(pr_id):
         verification_status = "Verified"
 
 
-    # ========================================================
-    # HIGH IMPACT
-    # ========================================================
-
     high_impact = is_high_impact(
 
         pr["Title"]
@@ -302,45 +321,53 @@ def generate_runbook(pr_id):
     )
 
 
-    # ========================================================
-    # CREATE RUNBOOK
-    # ========================================================
+    return {
 
-    runbook = {
+        "PR_ID":
+            pr_id,
 
-        "PR_ID": pr_id,
+        "Title":
+            pr["Title"],
 
-        "Title": pr["Title"],
+        "Problem":
+            incident_problem,
 
-        "Problem": incident_problem,
+        "Root_Cause":
+            incident_discussion,
 
-        "Root_Cause": incident_discussion,
+        "Solution":
+            pr["Resolution"],
 
-        "Solution": pr["Resolution"],
+        "Changed_File":
+            changed_file,
 
-        "Changed_File": changed_file,
+        "Old_Code":
+            old_code,
 
-        "Old_Code": old_code,
+        "New_Code":
+            new_code,
 
-        "New_Code": new_code,
+        "Verification":
+            verification,
 
-        "Verification": verification,
+        "Reviewer_Status":
+            reviewer_status,
 
-        "Reviewer_Status": reviewer_status,
+        "Verification_Status":
+            verification_status,
 
-        "Verification_Status": verification_status,
+        "Confidence":
+            confidence,
 
-        "Confidence": confidence,
+        "High_Impact":
+            high_impact,
 
-        "High_Impact": high_impact,
+        "Incident_Available":
+            incident_available,
 
-        "Incident_Available": incident_available,
-
-        "Diff_Available": diff_available
+        "Diff_Available":
+            diff_available
     }
-
-
-    return runbook
 
 
 # ============================================================
@@ -377,7 +404,7 @@ page = st.sidebar.radio(
 
         "📝 Audit Trail",
 
-        "📊 Experiment"
+        "📊 Validation Dashboard"
 
     ]
 )
@@ -622,8 +649,7 @@ elif page == "📘 Generate Runbook":
 
                 selected_pr,
 
-                "Runbook created from available PR, "
-                "incident, code diff and review data."
+                "Runbook created from available evidence."
 
             )
 
@@ -693,49 +719,37 @@ elif page == "📘 Generate Runbook":
         col1, col2 = st.columns(2)
 
         col1.metric(
-
             "Confidence",
-
             f'{rb["Confidence"]}%'
-
         )
 
         col2.metric(
-
             "Verification",
-
             rb["Verification_Status"]
-
         )
-
-
-        # ====================================================
-        # FAILURE WARNINGS
-        # ====================================================
 
         if not rb["Incident_Available"]:
 
             st.warning(
-                "⚠️ Edge Case: Incident data is missing."
+                "⚠️ Incident data is missing."
             )
 
         if not rb["Diff_Available"]:
 
             st.warning(
-                "⚠️ Edge Case: Code diff is missing."
+                "⚠️ Code diff is missing."
             )
 
         if rb["Reviewer_Status"] != "Approved":
 
             st.warning(
-                "⚠️ Reviewer approval is still required."
+                "⚠️ Reviewer approval is required."
             )
 
         if rb["High_Impact"]:
 
             st.warning(
-                "🚨 High-impact change detected. "
-                "Human confirmation is required."
+                "🚨 High-impact change detected."
             )
 
 
@@ -752,7 +766,6 @@ elif page == "✅ Review Runbooks":
     if not st.session_state.runbooks:
 
         st.info(
-            "No runbooks available. "
             "Generate a runbook first."
         )
 
@@ -765,10 +778,7 @@ elif page == "✅ Review Runbooks":
             st.divider()
 
             st.subheader(
-
-                f'{rb["PR_ID"]} - '
-                f'{rb["Title"]}'
-
+                f'{rb["PR_ID"]} - {rb["Title"]}'
             )
 
             st.write(
@@ -781,46 +791,32 @@ elif page == "✅ Review Runbooks":
                 f'{rb["Verification_Status"]}'
             )
 
-
-            # Missing data means cannot be verified
-
             if (
                 not rb["Incident_Available"]
                 or not rb["Diff_Available"]
             ):
 
                 st.error(
-                    "❌ This runbook cannot be fully verified "
-                    "because required evidence is missing."
+                    "❌ Required evidence is missing. "
+                    "Approval is blocked."
                 )
 
                 continue
-
-
-            # Pending review
 
             if rb["Reviewer_Status"] != "Approved":
 
                 st.warning(
-                    "⏳ Reviewer approval is required "
-                    "before this runbook can be approved."
+                    "⏳ Reviewer approval is required."
                 )
 
                 continue
 
-
-            # High impact
-
             if rb["High_Impact"]:
-
-                st.warning(
-                    "🚨 High-impact action detected."
-                )
 
                 confirmation = st.checkbox(
 
-                    "I confirm this high-impact runbook "
-                    "can be approved.",
+                    "I confirm this high-impact "
+                    "runbook can be approved.",
 
                     key=f"confirm_{i}"
 
@@ -830,18 +826,13 @@ elif page == "✅ Review Runbooks":
 
                 confirmation = True
 
-
             col1, col2 = st.columns(2)
-
 
             with col1:
 
                 if st.button(
-
                     "✅ Approve",
-
                     key=f"approve_{i}"
-
                 ):
 
                     if confirmation:
@@ -863,9 +854,8 @@ elif page == "✅ Review Runbooks":
                     else:
 
                         st.error(
-                            "Human confirmation is required."
+                            "Human confirmation required."
                         )
-
 
             with col2:
 
@@ -878,11 +868,8 @@ elif page == "✅ Review Runbooks":
                 )
 
                 if st.button(
-
                     "❌ Reject",
-
                     key=f"reject_{i}"
-
                 ):
 
                     if reason.strip():
@@ -898,14 +885,13 @@ elif page == "✅ Review Runbooks":
                         )
 
                         st.warning(
-                            "Runbook rejected and "
-                            "reason recorded."
+                            "Runbook rejected."
                         )
 
                     else:
 
                         st.error(
-                            "Please provide a rejection reason."
+                            "Rejection reason required."
                         )
 
 
@@ -920,13 +906,8 @@ elif page == "🔌 API Integration":
     )
 
     st.write(
-        "This prototype simulates how an external "
-        "engineering system sends maintenance data "
-        "to the assistant."
-    )
-
-    st.subheader(
-        "📡 Mock API"
+        "Simulated connection between an external "
+        "engineering system and the assistant."
     )
 
     selected_pr = st.selectbox(
@@ -959,7 +940,6 @@ elif page == "🔌 API Integration":
             reviews["PR_ID"]
             == selected_pr
         ]
-
 
         payload = {
 
@@ -1005,26 +985,18 @@ elif page == "🔌 API Integration":
                 )
         }
 
-
         st.session_state.api_records.append(
             payload
         )
 
-
         add_audit(
-
             "API Data Received",
-
             selected_pr,
-
-            "Maintenance data received "
-            "through mock API."
-
+            "Maintenance data received through mock API."
         )
 
-
         st.success(
-            "✅ Data successfully received."
+            "✅ Data received through mock API."
         )
 
         st.json(
@@ -1042,17 +1014,10 @@ elif page == "🔄 Rollback Manager":
         "🔄 Rollback Manager"
     )
 
-    st.write(
-        "Record a rollback to the previous safe "
-        "version of a change."
-    )
-
     st.warning(
-        "⚠️ This is a prototype simulation. "
-        "It does not modify real production code."
+        "⚠️ Prototype simulation. "
+        "Real production code is not modified."
     )
-
-    st.divider()
 
     selected_pr = st.selectbox(
 
@@ -1081,7 +1046,6 @@ elif page == "🔄 Rollback Manager":
             == selected_pr
         ].iloc[0]
 
-
         high_impact = is_high_impact(
 
             pr["Title"]
@@ -1090,22 +1054,11 @@ elif page == "🔄 Rollback Manager":
 
         )
 
-
-        st.subheader(
-            "📂 Change Information"
-        )
-
-        st.write(
-            f"**Pull Request:** {selected_pr}"
-        )
-
         st.write(
             f"**File:** {diff['File']}"
         )
 
-
         col1, col2 = st.columns(2)
-
 
         with col1:
 
@@ -1117,7 +1070,6 @@ elif page == "🔄 Rollback Manager":
                 str(diff["Old_Code"])
             )
 
-
         with col2:
 
             st.write(
@@ -1128,69 +1080,45 @@ elif page == "🔄 Rollback Manager":
                 str(diff["New_Code"])
             )
 
-
         if high_impact:
 
             st.warning(
-                "🚨 HIGH-IMPACT CHANGE: "
-                "Human confirmation is required."
+                "🚨 Human confirmation required."
             )
 
-            human_confirmation = st.checkbox(
-
-                "I confirm this rollback action.",
-
-                key=f"rollback_confirm_{selected_pr}"
-
+            confirmation = st.checkbox(
+                "I confirm this rollback.",
+                key=f"rollback_{selected_pr}"
             )
 
         else:
 
-            human_confirmation = True
+            confirmation = True
 
-
-        rollback_reason = st.text_area(
-
-            "Rollback reason",
-
-            placeholder=(
-                "Example: The new change caused "
-                "unexpected behaviour."
-            )
-
+        reason = st.text_area(
+            "Rollback reason"
         )
-
 
         if st.button(
             "🔄 Confirm Rollback"
         ):
 
-
-            # EDGE CASE:
-            # Missing rollback reason
-
-            if not rollback_reason.strip():
+            if not reason.strip():
 
                 st.error(
                     "❌ Rollback blocked: "
                     "reason is required."
                 )
 
-
-            # EDGE CASE:
-            # Missing human confirmation
-
-            elif not human_confirmation:
+            elif not confirmation:
 
                 st.error(
-                    "❌ Rollback blocked: "
-                    "human confirmation is required."
+                    "❌ Human confirmation required."
                 )
-
 
             else:
 
-                rollback_record = {
+                record = {
 
                     "Timestamp":
                         datetime.now().strftime(
@@ -1203,27 +1131,19 @@ elif page == "🔄 Rollback Manager":
                     "File":
                         diff["File"],
 
-                    "Rolled_Back_From":
-                        diff["New_Code"],
-
                     "Restored_To":
                         diff["Old_Code"],
 
                     "Reason":
-                        rollback_reason,
-
-                    "Human_Confirmed":
-                        True,
+                        reason,
 
                     "Status":
                         "Rollback Recorded"
                 }
 
-
                 st.session_state.rollback_log.append(
-                    rollback_record
+                    record
                 )
-
 
                 add_audit(
 
@@ -1231,37 +1151,29 @@ elif page == "🔄 Rollback Manager":
 
                     selected_pr,
 
-                    f"Rollback reason: "
-                    f"{rollback_reason}"
+                    reason
 
                 )
-
 
                 st.success(
-                    "✅ Rollback recorded successfully."
-                )
-
-
-                st.info(
-                    "No real source code was changed."
+                    "✅ Rollback recorded."
                 )
 
 
     if st.session_state.rollback_log:
 
-        st.divider()
-
         st.subheader(
             "📜 Rollback History"
         )
 
-        rollback_df = pd.DataFrame(
-            st.session_state.rollback_log
-        )
-
         st.dataframe(
-            rollback_df,
+
+            pd.DataFrame(
+                st.session_state.rollback_log
+            ),
+
             use_container_width=True
+
         )
 
 
@@ -1287,7 +1199,6 @@ elif page == "⚠️ Risk Checker":
         == selected_pr
     ].iloc[0]
 
-
     text = (
 
         pr["Title"]
@@ -1297,7 +1208,6 @@ elif page == "⚠️ Risk Checker":
         + pr["Resolution"]
 
     )
-
 
     if is_high_impact(text):
 
@@ -1315,10 +1225,6 @@ elif page == "⚠️ Risk Checker":
             "✅ Normal-risk change"
         )
 
-        st.write(
-            "Standard review process can be followed."
-        )
-
 
 # ============================================================
 # EDGE CASES
@@ -1331,105 +1237,8 @@ elif page == "🧪 Edge Cases":
     )
 
     st.write(
-        "The prototype tests how the assistant behaves "
-        "when important information or approval is missing."
-    )
-
-
-    # ========================================================
-    # CASE 1
-    # ========================================================
-
-    st.subheader(
-        "1️⃣ Missing Incident Data"
-    )
-
-    st.write(
-        "Expected behavior: The system should not crash."
-    )
-
-    st.info(
-        "The runbook should show that incident evidence "
-        "is missing and mark the runbook as incomplete."
-    )
-
-
-    # ========================================================
-    # CASE 2
-    # ========================================================
-
-    st.subheader(
-        "2️⃣ Pending Reviewer Approval"
-    )
-
-    st.write(
-        "Expected behavior: The system should not "
-        "automatically approve the runbook."
-    )
-
-    st.warning(
-        "Human reviewer approval is required."
-    )
-
-
-    # ========================================================
-    # CASE 3
-    # ========================================================
-
-    st.subheader(
-        "3️⃣ Missing Code Diff"
-    )
-
-    st.write(
-        "Expected behavior: The system should generate "
-        "an incomplete runbook instead of pretending "
-        "the evidence exists."
-    )
-
-    st.warning(
-        "Code verification is incomplete."
-    )
-
-
-    # ========================================================
-    # CASE 4
-    # ========================================================
-
-    st.subheader(
-        "4️⃣ High-Impact Change"
-    )
-
-    st.write(
-        "Expected behavior: A human must confirm the action."
-    )
-
-    st.error(
-        "🚨 High-impact actions require human confirmation."
-    )
-
-
-    # ========================================================
-    # CASE 5
-    # ========================================================
-
-    st.subheader(
-        "5️⃣ Rollback Without Reason"
-    )
-
-    st.write(
-        "Expected behavior: Rollback should be blocked "
-        "until a reason is provided."
-    )
-
-    st.error(
-        "❌ Rollback without a reason is blocked."
-    )
-
-
-    st.divider()
-
-    st.subheader(
-        "📊 Edge Case Summary"
+        "The assistant handles incomplete or risky information "
+        "without silently accepting it."
     )
 
     edge_data = pd.DataFrame({
@@ -1448,17 +1257,17 @@ elif page == "🧪 Edge Cases":
 
         ],
 
-        "System Response": [
+        "Expected Response": [
 
-            "Warning",
+            "Show warning",
 
-            "Approval Required",
+            "Require approval",
 
-            "Incomplete Runbook",
+            "Mark incomplete",
 
-            "Human Confirmation",
+            "Require confirmation",
 
-            "Action Blocked"
+            "Block rollback"
 
         ],
 
@@ -1478,13 +1287,9 @@ elif page == "🧪 Edge Cases":
 
     })
 
-
     st.dataframe(
-
         edge_data,
-
         use_container_width=True
-
     )
 
 
@@ -1513,10 +1318,6 @@ elif page == "📝 Audit Trail":
         st.dataframe(
             audit_df,
             use_container_width=True
-        )
-
-        st.subheader(
-            "🔍 Audit Summary"
         )
 
         col1, col2, col3 = st.columns(3)
@@ -1554,114 +1355,423 @@ elif page == "📝 Audit Trail":
 
 
 # ============================================================
-# EXPERIMENT
+# VALIDATION DASHBOARD
 # ============================================================
 
-elif page == "📊 Experiment":
+elif page == "📊 Validation Dashboard":
 
     st.title(
-        "📊 Validation Experiment"
+        "📊 Validation & Metrics Dashboard"
     )
 
     st.write(
-        "Measure whether the assistant reduces "
-        "the time required to repeat a known fix."
+        "Measure whether the Maintenance Knowledge Assistant "
+        "reduces the time needed to repeat known fixes."
     )
+
+    st.divider()
+
+    # --------------------------------------------------------
+    # INPUT SECTION
+    # --------------------------------------------------------
 
     st.subheader(
-        "⏱️ Enter Experiment Times"
+        "1️⃣ Add Experiment Result"
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        test_case = st.text_input(
+            "Test Case",
+            placeholder="Example: Redis timeout fix"
+        )
+
+    with col2:
+
+        baseline_time = st.number_input(
+
+            "Without Assistant (minutes)",
+
+            min_value=1.0,
+
+            value=60.0,
+
+            step=1.0
+
+        )
+
+    with col3:
+
+        assistant_time = st.number_input(
+
+            "With Assistant (minutes)",
+
+            min_value=1.0,
+
+            value=30.0,
+
+            step=1.0
+
+        )
+
+
+    result_status = st.selectbox(
+
+        "Result",
+
+        [
+            "Success",
+            "Partial Success",
+            "Failure"
+        ]
+
     )
 
 
-    baseline = st.number_input(
+    error_reason = st.text_input(
 
-        "Baseline time without assistant (minutes)",
+        "Error / Observation",
 
-        min_value=1.0,
-
-        value=60.0
-
-    )
-
-
-    assistant_time = st.number_input(
-
-        "Time with assistant (minutes)",
-
-        min_value=1.0,
-
-        value=30.0
+        placeholder=(
+            "Example: Engineer needed clarification "
+            "about the verification step."
+        )
 
     )
 
 
     if st.button(
-        "📈 Calculate Result"
+        "➕ Add Experiment Result"
     ):
 
-        reduction = (
+        if not test_case.strip():
 
-            (baseline - assistant_time)
-            / baseline
+            st.error(
+                "Please enter a test case."
+            )
 
-        ) * 100
+        else:
+
+            time_saved = (
+                baseline_time
+                - assistant_time
+            )
+
+            reduction = (
+
+                time_saved
+                / baseline_time
+
+            ) * 100
 
 
-        st.success(
+            experiment = {
 
-            f"Time reduction: "
-            f"{reduction:.2f}%"
+                "Test Case":
+                    test_case,
+
+                "Baseline (min)":
+                    baseline_time,
+
+                "Assistant (min)":
+                    assistant_time,
+
+                "Time Saved (min)":
+                    time_saved,
+
+                "Reduction (%)":
+                    round(reduction, 2),
+
+                "Result":
+                    result_status,
+
+                "Observation":
+                    error_reason
+            }
+
+
+            st.session_state.experiment_results.append(
+                experiment
+            )
+
+
+            add_audit(
+
+                "Experiment Result Added",
+
+                "N/A",
+
+                test_case
+
+            )
+
+
+            st.success(
+                "✅ Experiment result added."
+            )
+
+
+    # --------------------------------------------------------
+    # RESULTS
+    # --------------------------------------------------------
+
+    if st.session_state.experiment_results:
+
+        st.divider()
+
+        st.subheader(
+            "2️⃣ Experiment Results"
+        )
+
+        results_df = pd.DataFrame(
+            st.session_state.experiment_results
+        )
+
+        st.dataframe(
+
+            results_df,
+
+            use_container_width=True
 
         )
 
 
-        col1, col2, col3 = st.columns(3)
+        # ----------------------------------------------------
+        # METRICS
+        # ----------------------------------------------------
 
+        st.subheader(
+            "3️⃣ Key Metrics"
+        )
+
+        avg_baseline = results_df[
+            "Baseline (min)"
+        ].mean()
+
+        avg_assistant = results_df[
+            "Assistant (min)"
+        ].mean()
+
+        avg_saved = results_df[
+            "Time Saved (min)"
+        ].mean()
+
+        avg_reduction = results_df[
+            "Reduction (%)"
+        ].mean()
+
+        success_count = len(
+
+            results_df[
+                results_df["Result"]
+                == "Success"
+            ]
+
+        )
+
+        total_tests = len(
+            results_df
+        )
+
+
+        col1, col2, col3, col4 = st.columns(4)
 
         col1.metric(
 
-            "Baseline",
+            "Average Baseline",
 
-            f"{baseline:.1f} min"
+            f"{avg_baseline:.1f} min"
 
         )
-
 
         col2.metric(
 
-            "With Assistant",
+            "Average Assistant",
 
-            f"{assistant_time:.1f} min"
+            f"{avg_assistant:.1f} min"
 
         )
-
 
         col3.metric(
 
-            "Reduction",
+            "Average Time Saved",
 
-            f"{reduction:.2f}%"
+            f"{avg_saved:.1f} min"
+
+        )
+
+        col4.metric(
+
+            "Average Reduction",
+
+            f"{avg_reduction:.1f}%"
 
         )
 
 
-        if reduction > 0:
+        # ----------------------------------------------------
+        # SUCCESS RATE
+        # ----------------------------------------------------
+
+        success_rate = (
+
+            success_count
+            / total_tests
+        ) * 100
+
+
+        st.metric(
+
+            "Success Rate",
+
+            f"{success_rate:.1f}%"
+
+        )
+
+
+        # ----------------------------------------------------
+        # CHART
+        # ----------------------------------------------------
+
+        st.subheader(
+            "4️⃣ Time Comparison"
+        )
+
+        chart_data = results_df[
+            [
+                "Test Case",
+                "Baseline (min)",
+                "Assistant (min)"
+            ]
+        ].set_index(
+            "Test Case"
+        )
+
+        st.bar_chart(
+            chart_data
+        )
+
+
+        # ----------------------------------------------------
+        # ERROR ANALYSIS
+        # ----------------------------------------------------
+
+        st.subheader(
+            "5️⃣ Error Analysis"
+        )
+
+        failures = results_df[
+            results_df["Result"] != "Success"
+        ]
+
+
+        if len(failures) == 0:
 
             st.success(
-                "The assistant reduced the time "
-                "required to repeat the fix."
+                "✅ No failed or partial test cases."
             )
 
         else:
 
             st.warning(
-                "The assistant did not reduce "
-                "the measured time."
+                f"{len(failures)} test case(s) "
+                "need further analysis."
+            )
+
+            st.dataframe(
+
+                failures[
+                    [
+                        "Test Case",
+                        "Result",
+                        "Observation"
+                    ]
+                ],
+
+                use_container_width=True
+
             )
 
 
+        # ----------------------------------------------------
+        # PROJECT TARGET
+        # ----------------------------------------------------
+
+        st.subheader(
+            "6️⃣ Project Target"
+        )
+
+        target = 30
+
+        st.write(
+            "Target: At least 30% reduction in "
+            "known-fix reproduction time."
+        )
+
+
+        if avg_reduction >= target:
+
+            st.success(
+
+                f"🎯 Target achieved: "
+                f"{avg_reduction:.1f}% reduction."
+
+            )
+
+        else:
+
+            st.warning(
+
+                f"Target not yet achieved. "
+                f"Current reduction: "
+                f"{avg_reduction:.1f}%."
+
+            )
+
+
+        # ----------------------------------------------------
+        # VALIDATION CONCLUSION
+        # ----------------------------------------------------
+
+        st.subheader(
+            "7️⃣ Validation Conclusion"
+        )
+
+        st.info(
+
+            f"""
+The experiment tested {total_tests} case(s).
+
+Average time without the assistant:
+{avg_baseline:.1f} minutes
+
+Average time with the assistant:
+{avg_assistant:.1f} minutes
+
+Average time saved:
+{avg_saved:.1f} minutes
+
+Average reduction:
+{avg_reduction:.1f}%
+
+Success rate:
+{success_rate:.1f}%
+"""
+
+        )
+
+    else:
+
+        st.info(
+            "Add experiment results above to "
+            "generate the validation dashboard."
+        )
+
+
 # ============================================================
-# FOOTER
+# SIDEBAR FOOTER
 # ============================================================
 
 st.sidebar.divider()
