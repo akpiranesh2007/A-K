@@ -1,0 +1,6 @@
+PR_ID,File,Old_Code,New_Code
+PR101,cache.py,timeout = 5,timeout = 30
+PR102,parser.py,process(row),if row: process(row)
+PR103,memory.py,objects kept in memory,objects released after processing
+PR104,auth.py,authenticate(user),"authenticate(user, validate_session=True)"
+PR105,api.py,process(request),validate(request); process(request)

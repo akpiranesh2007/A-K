@@ -1,0 +1,6 @@
+PR_ID,Title,Description,Resolution,Reviewer,Status
+PR101,Fix Redis API timeout,API requests were timing out because Redis timeout was too low.,Increased Redis connection timeout from 5 to 30 seconds.,Reviewer001,Approved
+PR102,Fix CSV parser crash,CSV parser crashes when an empty row is present.,Added validation to ignore empty rows.,Reviewer002,Approved
+PR103,Fix memory issue,Application memory increased during large file processing.,Released unused object references after processing.,Reviewer003,Approved
+PR104,Fix authentication issue,Authentication fails for expired sessions.,Added session expiration validation.,Not Assigned,Pending
+PR105,Fix API response error,API returns an incorrect response for missing parameters.,Added input validation before processing the request.,Reviewer004,Approved

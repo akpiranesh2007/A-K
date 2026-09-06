@@ -1,0 +1,6 @@
+Incident_ID,PR_ID,Problem,Discussion,Final_Resolution
+INC001,PR101,API requests timeout during heavy usage.,Team identified Redis connection timeout as the cause.,Increase Redis timeout.
+INC002,PR102,CSV parser crashes on empty rows.,Empty rows were causing an exception.,Validate rows before processing.
+INC003,PR103,Memory usage increases during file processing.,Unused objects remained in memory.,Release unused references.
+INC004,PR104,Users cannot authenticate after session expiry.,Session expiration handling needs investigation.,Not verified yet.
+INC005,PR105,API returns incorrect response for missing parameters.,Team found missing input validation.,Add input validation.
