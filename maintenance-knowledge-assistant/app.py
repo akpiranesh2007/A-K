@@ -35,6 +35,7 @@ def load_data():
 
 
 try:
+
     pull_requests, incidents, code_diffs, reviews = load_data()
 
 except Exception as e:
@@ -58,6 +59,7 @@ maintenance-knowledge-assistant/
     """)
 
     st.error(f"Error: {e}")
+
     st.stop()
 
 
@@ -79,22 +81,33 @@ if "rollback_log" not in st.session_state:
 
 
 # ============================================================
-# HELPER FUNCTIONS
+# AUDIT FUNCTION
 # ============================================================
 
 def add_audit(action, pr_id, details):
 
     st.session_state.audit_log.append({
-        "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+
+        "Timestamp": datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+
         "Action": action,
+
         "PR_ID": pr_id,
+
         "Details": details
     })
 
 
+# ============================================================
+# RISK CHECKER
+# ============================================================
+
 def is_high_impact(text):
 
     keywords = [
+
         "authentication",
         "security",
         "password",
@@ -103,59 +116,229 @@ def is_high_impact(text):
         "payment",
         "delete",
         "production"
+
     ]
 
     text = str(text).lower()
 
-    return any(word in text for word in keywords)
+    return any(
+        word in text
+        for word in keywords
+    )
 
+
+# ============================================================
+# RUNBOOK GENERATOR
+# ============================================================
 
 def generate_runbook(pr_id):
 
-    pr = pull_requests[pull_requests["PR_ID"] == pr_id].iloc[0]
+    pr_rows = pull_requests[
+        pull_requests["PR_ID"] == pr_id
+    ]
 
-    incident_rows = incidents[incidents["PR_ID"] == pr_id]
+    # EDGE CASE 1:
+    # PR does not exist
 
-    diff_rows = code_diffs[code_diffs["PR_ID"] == pr_id]
+    if len(pr_rows) == 0:
 
-    review_rows = reviews[reviews["PR_ID"] == pr_id]
+        return {
+            "error": "Pull Request not found."
+        }
 
-    incident = incident_rows.iloc[0] if len(incident_rows) > 0 else None
-    diff = diff_rows.iloc[0] if len(diff_rows) > 0 else None
-    review = review_rows.iloc[0] if len(review_rows) > 0 else None
+    pr = pr_rows.iloc[0]
 
-    reviewer_status = review["Decision"] if review is not None else "Unknown"
+    incident_rows = incidents[
+        incidents["PR_ID"] == pr_id
+    ]
 
-    # Confidence calculation
+    diff_rows = code_diffs[
+        code_diffs["PR_ID"] == pr_id
+    ]
+
+    review_rows = reviews[
+        reviews["PR_ID"] == pr_id
+    ]
+
+
+    # ========================================================
+    # EDGE CASE 2:
+    # MISSING INCIDENT
+    # ========================================================
+
+    if len(incident_rows) == 0:
+
+        incident_problem = (
+            "Incident information is missing."
+        )
+
+        incident_discussion = (
+            "Root cause cannot be fully verified."
+        )
+
+        incident_available = False
+
+    else:
+
+        incident = incident_rows.iloc[0]
+
+        incident_problem = incident["Problem"]
+
+        incident_discussion = incident["Discussion"]
+
+        incident_available = True
+
+
+    # ========================================================
+    # EDGE CASE 3:
+    # MISSING CODE DIFF
+    # ========================================================
+
+    if len(diff_rows) == 0:
+
+        changed_file = "Code diff unavailable."
+
+        old_code = "Not available."
+
+        new_code = "Not available."
+
+        diff_available = False
+
+    else:
+
+        diff = diff_rows.iloc[0]
+
+        changed_file = diff["File"]
+
+        old_code = diff["Old_Code"]
+
+        new_code = diff["New_Code"]
+
+        diff_available = True
+
+
+    # ========================================================
+    # REVIEW STATUS
+    # ========================================================
+
+    if len(review_rows) == 0:
+
+        reviewer_status = "Unknown"
+
+        verification = "Reviewer information unavailable."
+
+    else:
+
+        review = review_rows.iloc[0]
+
+        reviewer_status = review["Decision"]
+
+        verification = review["Comment"]
+
+
+    # ========================================================
+    # CONFIDENCE SCORE
+    # ========================================================
+
     confidence = 40
 
+    if incident_available:
+
+        confidence += 15
+
+    if diff_available:
+
+        confidence += 15
+
     if reviewer_status == "Approved":
+
         confidence += 30
 
-    if incident is not None:
-        confidence += 15
+    confidence = min(
+        confidence,
+        100
+    )
 
-    if diff is not None:
-        confidence += 15
 
-    confidence = min(confidence, 100)
+    # ========================================================
+    # VERIFICATION STATUS
+    # ========================================================
+
+    if not incident_available:
+
+        verification_status = (
+            "Incomplete - Incident missing"
+        )
+
+    elif not diff_available:
+
+        verification_status = (
+            "Incomplete - Code diff missing"
+        )
+
+    elif reviewer_status != "Approved":
+
+        verification_status = (
+            "Pending - Reviewer approval required"
+        )
+
+    else:
+
+        verification_status = "Verified"
+
+
+    # ========================================================
+    # HIGH IMPACT
+    # ========================================================
+
+    high_impact = is_high_impact(
+
+        pr["Title"]
+        + " "
+        + pr["Description"]
+        + " "
+        + pr["Resolution"]
+
+    )
+
+
+    # ========================================================
+    # CREATE RUNBOOK
+    # ========================================================
 
     runbook = {
+
         "PR_ID": pr_id,
+
         "Title": pr["Title"],
-        "Problem": incident["Problem"] if incident is not None else pr["Description"],
-        "Root_Cause": incident["Discussion"] if incident is not None else "Not available",
+
+        "Problem": incident_problem,
+
+        "Root_Cause": incident_discussion,
+
         "Solution": pr["Resolution"],
-        "Changed_File": diff["File"] if diff is not None else "Not available",
-        "Old_Code": diff["Old_Code"] if diff is not None else "Not available",
-        "New_Code": diff["New_Code"] if diff is not None else "Not available",
-        "Verification": review["Comment"] if review is not None else "Review not available",
+
+        "Changed_File": changed_file,
+
+        "Old_Code": old_code,
+
+        "New_Code": new_code,
+
+        "Verification": verification,
+
         "Reviewer_Status": reviewer_status,
+
+        "Verification_Status": verification_status,
+
         "Confidence": confidence,
-        "High_Impact": is_high_impact(
-            pr["Title"] + " " + pr["Description"]
-        )
+
+        "High_Impact": high_impact,
+
+        "Incident_Available": incident_available,
+
+        "Diff_Available": diff_available
     }
+
 
     return runbook
 
@@ -164,21 +347,38 @@ def generate_runbook(pr_id):
 # SIDEBAR
 # ============================================================
 
-st.sidebar.title("🛠️ Maintenance Assistant")
+st.sidebar.title(
+    "🛠️ Maintenance Assistant"
+)
 
 page = st.sidebar.radio(
+
     "Navigation",
+
     [
+
         "🏠 Dashboard",
+
         "📋 Pull Requests",
+
         "🚨 Incidents",
+
         "📘 Generate Runbook",
+
         "✅ Review Runbooks",
+
         "🔌 API Integration",
+
         "🔄 Rollback Manager",
+
         "⚠️ Risk Checker",
+
+        "🧪 Edge Cases",
+
         "📝 Audit Trail",
+
         "📊 Experiment"
+
     ]
 )
 
@@ -189,10 +389,13 @@ page = st.sidebar.radio(
 
 if page == "🏠 Dashboard":
 
-    st.title("🛠️ Maintenance Knowledge-Capture Assistant")
+    st.title(
+        "🛠️ Maintenance Knowledge-Capture Assistant"
+    )
 
     st.write(
-        "Convert completed software fixes into verified and reusable runbooks."
+        "Convert completed software fixes into "
+        "verified and reusable runbooks."
     )
 
     col1, col2, col3, col4 = st.columns(4)
@@ -219,32 +422,37 @@ if page == "🏠 Dashboard":
 
     st.divider()
 
-    st.subheader("🔄 System Workflow")
+    st.subheader(
+        "🔄 System Workflow"
+    )
 
     st.info(
         """
-        Completed Fix
-        ↓
-        Pull Request
-        ↓
-        Incident Discussion
-        ↓
-        Code Diff
-        ↓
-        Reviewer Approval
-        ↓
-        Runbook Generation
-        ↓
-        Human Verification
-        ↓
-        Verified Knowledge
-        """
+Completed Fix
+↓
+Pull Request
+↓
+Incident Discussion
+↓
+Code Diff
+↓
+Reviewer Approval
+↓
+Runbook Generation
+↓
+Human Verification
+↓
+Verified Knowledge
+"""
     )
 
-    st.subheader("🎯 Main Project Goal")
+    st.subheader(
+        "🎯 Project Goal"
+    )
 
     st.write(
-        "Reduce the time required for a new engineer to repeat a known fix."
+        "Reduce the time required for a new engineer "
+        "to repeat a known fix."
     )
 
 
@@ -254,17 +462,23 @@ if page == "🏠 Dashboard":
 
 elif page == "📋 Pull Requests":
 
-    st.title("📋 Pull Requests")
+    st.title(
+        "📋 Pull Requests"
+    )
 
     st.dataframe(
         pull_requests,
         use_container_width=True
     )
 
-    st.subheader("Pull Request Details")
+    st.subheader(
+        "Pull Request Details"
+    )
 
     selected_pr = st.selectbox(
+
         "Select PR",
+
         pull_requests["PR_ID"].tolist()
     )
 
@@ -272,20 +486,45 @@ elif page == "📋 Pull Requests":
         pull_requests["PR_ID"] == selected_pr
     ].iloc[0]
 
-    st.write("### Title")
-    st.write(pr["Title"])
+    st.write(
+        "### Title"
+    )
 
-    st.write("### Description")
-    st.write(pr["Description"])
+    st.write(
+        pr["Title"]
+    )
 
-    st.write("### Resolution")
-    st.success(pr["Resolution"])
+    st.write(
+        "### Description"
+    )
 
-    st.write("### Reviewer")
-    st.write(pr["Reviewer"])
+    st.write(
+        pr["Description"]
+    )
 
-    st.write("### Status")
-    st.write(pr["Status"])
+    st.write(
+        "### Resolution"
+    )
+
+    st.success(
+        pr["Resolution"]
+    )
+
+    st.write(
+        "### Reviewer"
+    )
+
+    st.write(
+        pr["Reviewer"]
+    )
+
+    st.write(
+        "### Status"
+    )
+
+    st.write(
+        pr["Status"]
+    )
 
 
 # ============================================================
@@ -294,7 +533,9 @@ elif page == "📋 Pull Requests":
 
 elif page == "🚨 Incidents":
 
-    st.title("🚨 Incident Records")
+    st.title(
+        "🚨 Incident Records"
+    )
 
     st.dataframe(
         incidents,
@@ -302,22 +543,40 @@ elif page == "🚨 Incidents":
     )
 
     selected_incident = st.selectbox(
+
         "Select Incident",
+
         incidents["Incident_ID"].tolist()
     )
 
     incident = incidents[
-        incidents["Incident_ID"] == selected_incident
+        incidents["Incident_ID"]
+        == selected_incident
     ].iloc[0]
 
-    st.write("### Problem")
-    st.write(incident["Problem"])
+    st.write(
+        "### Problem"
+    )
 
-    st.write("### Team Discussion")
-    st.write(incident["Discussion"])
+    st.write(
+        incident["Problem"]
+    )
 
-    st.write("### Final Resolution")
-    st.success(incident["Final_Resolution"])
+    st.write(
+        "### Team Discussion"
+    )
+
+    st.write(
+        incident["Discussion"]
+    )
+
+    st.write(
+        "### Final Resolution"
+    )
+
+    st.success(
+        incident["Final_Resolution"]
+    )
 
 
 # ============================================================
@@ -326,68 +585,157 @@ elif page == "🚨 Incidents":
 
 elif page == "📘 Generate Runbook":
 
-    st.title("📘 Generate Maintenance Runbook")
+    st.title(
+        "📘 Generate Maintenance Runbook"
+    )
 
     selected_pr = st.selectbox(
+
         "Select Pull Request",
+
         pull_requests["PR_ID"].tolist()
     )
 
-    if st.button("🚀 Generate Runbook"):
+    if st.button(
+        "🚀 Generate Runbook"
+    ):
 
-        runbook = generate_runbook(selected_pr)
-
-        st.session_state.runbooks.append(runbook)
-
-        add_audit(
-            "Runbook Generated",
-            selected_pr,
-            "Runbook created from PR, incident, code diff and review."
+        runbook = generate_runbook(
+            selected_pr
         )
 
-        st.success("✅ Runbook generated successfully!")
+        if "error" in runbook:
+
+            st.error(
+                runbook["error"]
+            )
+
+        else:
+
+            st.session_state.runbooks.append(
+                runbook
+            )
+
+            add_audit(
+
+                "Runbook Generated",
+
+                selected_pr,
+
+                "Runbook created from available PR, "
+                "incident, code diff and review data."
+
+            )
+
+            st.success(
+                "✅ Runbook generated successfully!"
+            )
+
 
     if st.session_state.runbooks:
 
         st.divider()
 
-        st.subheader("Latest Runbook")
+        st.subheader(
+            "Latest Runbook"
+        )
 
         rb = st.session_state.runbooks[-1]
 
-        st.write("### Problem")
-        st.write(rb["Problem"])
+        st.write(
+            "### Problem"
+        )
 
-        st.write("### Root Cause")
-        st.write(rb["Root_Cause"])
+        st.write(
+            rb["Problem"]
+        )
 
-        st.write("### Solution")
-        st.success(rb["Solution"])
+        st.write(
+            "### Root Cause"
+        )
 
-        st.write("### Changed File")
-        st.code(rb["Changed_File"])
+        st.write(
+            rb["Root_Cause"]
+        )
 
-        st.write("### Previous Code")
-        st.code(rb["Old_Code"])
+        st.write(
+            "### Solution"
+        )
 
-        st.write("### New Code")
-        st.code(rb["New_Code"])
+        st.success(
+            rb["Solution"]
+        )
+
+        st.write(
+            "### Changed File"
+        )
+
+        st.code(
+            rb["Changed_File"]
+        )
+
+        st.write(
+            "### Previous Code"
+        )
+
+        st.code(
+            rb["Old_Code"]
+        )
+
+        st.write(
+            "### New Code"
+        )
+
+        st.code(
+            rb["New_Code"]
+        )
 
         col1, col2 = st.columns(2)
 
         col1.metric(
+
             "Confidence",
+
             f'{rb["Confidence"]}%'
+
         )
 
         col2.metric(
-            "Reviewer Status",
-            rb["Reviewer_Status"]
+
+            "Verification",
+
+            rb["Verification_Status"]
+
         )
 
-        if rb["High_Impact"]:
+
+        # ====================================================
+        # FAILURE WARNINGS
+        # ====================================================
+
+        if not rb["Incident_Available"]:
+
             st.warning(
-                "⚠️ High-impact change detected. Human confirmation is required."
+                "⚠️ Edge Case: Incident data is missing."
+            )
+
+        if not rb["Diff_Available"]:
+
+            st.warning(
+                "⚠️ Edge Case: Code diff is missing."
+            )
+
+        if rb["Reviewer_Status"] != "Approved":
+
+            st.warning(
+                "⚠️ Reviewer approval is still required."
+            )
+
+        if rb["High_Impact"]:
+
+            st.warning(
+                "🚨 High-impact change detected. "
+                "Human confirmation is required."
             )
 
 
@@ -397,65 +745,120 @@ elif page == "📘 Generate Runbook":
 
 elif page == "✅ Review Runbooks":
 
-    st.title("✅ Review Runbooks")
+    st.title(
+        "✅ Review Runbooks"
+    )
 
     if not st.session_state.runbooks:
 
         st.info(
-            "No runbooks available. Generate a runbook first."
+            "No runbooks available. "
+            "Generate a runbook first."
         )
 
     else:
 
-        for i, rb in enumerate(st.session_state.runbooks):
+        for i, rb in enumerate(
+            st.session_state.runbooks
+        ):
 
             st.divider()
 
             st.subheader(
-                f'{rb["PR_ID"]} - {rb["Title"]}'
+
+                f'{rb["PR_ID"]} - '
+                f'{rb["Title"]}'
+
             )
 
             st.write(
-                f'**Confidence:** {rb["Confidence"]}%'
+                f'**Confidence:** '
+                f'{rb["Confidence"]}%'
             )
 
             st.write(
-                f'**Reviewer Status:** {rb["Reviewer_Status"]}'
+                f'**Status:** '
+                f'{rb["Verification_Status"]}'
             )
+
+
+            # Missing data means cannot be verified
+
+            if (
+                not rb["Incident_Available"]
+                or not rb["Diff_Available"]
+            ):
+
+                st.error(
+                    "❌ This runbook cannot be fully verified "
+                    "because required evidence is missing."
+                )
+
+                continue
+
+
+            # Pending review
+
+            if rb["Reviewer_Status"] != "Approved":
+
+                st.warning(
+                    "⏳ Reviewer approval is required "
+                    "before this runbook can be approved."
+                )
+
+                continue
+
+
+            # High impact
 
             if rb["High_Impact"]:
 
                 st.warning(
-                    "⚠️ High-impact action. Human confirmation required."
+                    "🚨 High-impact action detected."
                 )
 
                 confirmation = st.checkbox(
-                    "I confirm that this high-impact runbook can be approved.",
+
+                    "I confirm this high-impact runbook "
+                    "can be approved.",
+
                     key=f"confirm_{i}"
+
                 )
 
             else:
 
                 confirmation = True
 
+
             col1, col2 = st.columns(2)
+
 
             with col1:
 
                 if st.button(
+
                     "✅ Approve",
+
                     key=f"approve_{i}"
+
                 ):
 
                     if confirmation:
 
                         add_audit(
+
                             "Runbook Approved",
+
                             rb["PR_ID"],
+
                             "Human reviewer approved the runbook."
+
                         )
 
-                        st.success("Runbook approved.")
+                        st.success(
+                            "Runbook approved."
+                        )
 
                     else:
 
@@ -463,28 +866,40 @@ elif page == "✅ Review Runbooks":
                             "Human confirmation is required."
                         )
 
+
             with col2:
 
                 reason = st.text_input(
+
                     "Rejection reason",
+
                     key=f"reason_{i}"
+
                 )
 
                 if st.button(
+
                     "❌ Reject",
+
                     key=f"reject_{i}"
+
                 ):
 
                     if reason.strip():
 
                         add_audit(
+
                             "Runbook Rejected",
+
                             rb["PR_ID"],
+
                             reason
+
                         )
 
                         st.warning(
-                            "Runbook rejected and reason recorded."
+                            "Runbook rejected and "
+                            "reason recorded."
                         )
 
                     else:
@@ -500,86 +915,120 @@ elif page == "✅ Review Runbooks":
 
 elif page == "🔌 API Integration":
 
-    st.title("🔌 API Integration")
-
-    st.write(
-        "This prototype simulates how an external engineering system "
-        "can send maintenance information to the assistant."
+    st.title(
+        "🔌 API Integration"
     )
 
-    st.subheader("📡 Mock API")
+    st.write(
+        "This prototype simulates how an external "
+        "engineering system sends maintenance data "
+        "to the assistant."
+    )
+
+    st.subheader(
+        "📡 Mock API"
+    )
 
     selected_pr = st.selectbox(
+
         "Select PR to send",
+
         pull_requests["PR_ID"].tolist()
     )
 
-    if st.button("📤 Send PR to Assistant"):
+    if st.button(
+        "📤 Send PR to Assistant"
+    ):
 
         pr = pull_requests[
-            pull_requests["PR_ID"] == selected_pr
+            pull_requests["PR_ID"]
+            == selected_pr
         ].iloc[0]
 
         incident_rows = incidents[
-            incidents["PR_ID"] == selected_pr
+            incidents["PR_ID"]
+            == selected_pr
         ]
 
         diff_rows = code_diffs[
-            code_diffs["PR_ID"] == selected_pr
+            code_diffs["PR_ID"]
+            == selected_pr
         ]
 
         review_rows = reviews[
-            reviews["PR_ID"] == selected_pr
+            reviews["PR_ID"]
+            == selected_pr
         ]
 
+
         payload = {
-            "source": "Mock Engineering API",
-            "timestamp": datetime.now().strftime(
-                "%Y-%m-%d %H:%M:%S"
-            ),
-            "PR_ID": selected_pr,
-            "title": pr["Title"],
-            "description": pr["Description"],
-            "resolution": pr["Resolution"],
-            "incident": (
-                incident_rows.iloc[0].to_dict()
-                if len(incident_rows) > 0
-                else {}
-            ),
-            "code_diff": (
-                diff_rows.iloc[0].to_dict()
-                if len(diff_rows) > 0
-                else {}
-            ),
-            "review": (
-                review_rows.iloc[0].to_dict()
-                if len(review_rows) > 0
-                else {}
-            )
+
+            "source":
+                "Mock Engineering API",
+
+            "timestamp":
+                datetime.now().strftime(
+                    "%Y-%m-%d %H:%M:%S"
+                ),
+
+            "PR_ID":
+                selected_pr,
+
+            "title":
+                pr["Title"],
+
+            "description":
+                pr["Description"],
+
+            "resolution":
+                pr["Resolution"],
+
+            "incident":
+                (
+                    incident_rows.iloc[0].to_dict()
+                    if len(incident_rows) > 0
+                    else {}
+                ),
+
+            "code_diff":
+                (
+                    diff_rows.iloc[0].to_dict()
+                    if len(diff_rows) > 0
+                    else {}
+                ),
+
+            "review":
+                (
+                    review_rows.iloc[0].to_dict()
+                    if len(review_rows) > 0
+                    else {}
+                )
         }
 
-        st.session_state.api_records.append(payload)
+
+        st.session_state.api_records.append(
+            payload
+        )
+
 
         add_audit(
+
             "API Data Received",
+
             selected_pr,
-            "Maintenance data received through mock API."
+
+            "Maintenance data received "
+            "through mock API."
+
         )
+
 
         st.success(
-            "✅ Data successfully received through mock API."
+            "✅ Data successfully received."
         )
 
-        st.json(payload)
-
-    if st.session_state.api_records:
-
-        st.divider()
-
-        st.subheader("📦 Received API Records")
-
         st.json(
-            st.session_state.api_records[-1]
+            payload
         )
 
 
@@ -589,33 +1038,38 @@ elif page == "🔌 API Integration":
 
 elif page == "🔄 Rollback Manager":
 
-    st.title("🔄 Rollback Manager")
+    st.title(
+        "🔄 Rollback Manager"
+    )
 
     st.write(
-        "Rollback allows the team to record a return to the previous "
-        "safe version when a change needs to be reversed."
+        "Record a rollback to the previous safe "
+        "version of a change."
     )
 
     st.warning(
-        "⚠️ This prototype records a rollback action only. "
-        "It does NOT modify real production code."
+        "⚠️ This is a prototype simulation. "
+        "It does not modify real production code."
     )
 
     st.divider()
 
     selected_pr = st.selectbox(
+
         "Select PR for rollback",
+
         pull_requests["PR_ID"].tolist()
     )
 
     diff_rows = code_diffs[
-        code_diffs["PR_ID"] == selected_pr
+        code_diffs["PR_ID"]
+        == selected_pr
     ]
 
     if len(diff_rows) == 0:
 
         st.error(
-            "No code difference found for this PR."
+            "❌ No code diff found."
         )
 
     else:
@@ -623,14 +1077,23 @@ elif page == "🔄 Rollback Manager":
         diff = diff_rows.iloc[0]
 
         pr = pull_requests[
-            pull_requests["PR_ID"] == selected_pr
+            pull_requests["PR_ID"]
+            == selected_pr
         ].iloc[0]
 
+
         high_impact = is_high_impact(
-            pr["Title"] + " " + pr["Description"]
+
+            pr["Title"]
+            + " "
+            + pr["Description"]
+
         )
 
-        st.subheader("📂 Change Information")
+
+        st.subheader(
+            "📂 Change Information"
+        )
 
         st.write(
             f"**Pull Request:** {selected_pr}"
@@ -640,100 +1103,157 @@ elif page == "🔄 Rollback Manager":
             f"**File:** {diff['File']}"
         )
 
+
         col1, col2 = st.columns(2)
+
 
         with col1:
 
-            st.write("### Previous Safe Version")
+            st.write(
+                "### Previous Safe Version"
+            )
 
             st.code(
-                str(diff["Old_Code"]),
-                language="text"
+                str(diff["Old_Code"])
             )
+
 
         with col2:
 
-            st.write("### Current Applied Version")
+            st.write(
+                "### Current Version"
+            )
 
             st.code(
-                str(diff["New_Code"]),
-                language="text"
+                str(diff["New_Code"])
             )
+
 
         if high_impact:
 
             st.warning(
-                "🚨 HIGH-IMPACT CHANGE: Human confirmation is required "
-                "before recording this rollback."
+                "🚨 HIGH-IMPACT CHANGE: "
+                "Human confirmation is required."
             )
 
             human_confirmation = st.checkbox(
+
                 "I confirm this rollback action.",
+
                 key=f"rollback_confirm_{selected_pr}"
+
             )
 
         else:
 
             human_confirmation = True
 
+
         rollback_reason = st.text_area(
+
             "Rollback reason",
-            placeholder="Example: The new change caused unexpected behaviour."
+
+            placeholder=(
+                "Example: The new change caused "
+                "unexpected behaviour."
+            )
+
         )
 
-        if st.button("🔄 Confirm Rollback"):
+
+        if st.button(
+            "🔄 Confirm Rollback"
+        ):
+
+
+            # EDGE CASE:
+            # Missing rollback reason
 
             if not rollback_reason.strip():
 
                 st.error(
-                    "Please enter a rollback reason."
+                    "❌ Rollback blocked: "
+                    "reason is required."
                 )
+
+
+            # EDGE CASE:
+            # Missing human confirmation
 
             elif not human_confirmation:
 
                 st.error(
-                    "Human confirmation is required for this rollback."
+                    "❌ Rollback blocked: "
+                    "human confirmation is required."
                 )
+
 
             else:
 
                 rollback_record = {
-                    "Timestamp": datetime.now().strftime(
-                        "%Y-%m-%d %H:%M:%S"
-                    ),
-                    "PR_ID": selected_pr,
-                    "File": diff["File"],
-                    "Rolled_Back_From": diff["New_Code"],
-                    "Restored_To": diff["Old_Code"],
-                    "Reason": rollback_reason,
-                    "Human_Confirmed": True,
-                    "Status": "Rollback Recorded"
+
+                    "Timestamp":
+                        datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        ),
+
+                    "PR_ID":
+                        selected_pr,
+
+                    "File":
+                        diff["File"],
+
+                    "Rolled_Back_From":
+                        diff["New_Code"],
+
+                    "Restored_To":
+                        diff["Old_Code"],
+
+                    "Reason":
+                        rollback_reason,
+
+                    "Human_Confirmed":
+                        True,
+
+                    "Status":
+                        "Rollback Recorded"
                 }
+
 
                 st.session_state.rollback_log.append(
                     rollback_record
                 )
 
+
                 add_audit(
+
                     "Rollback Recorded",
+
                     selected_pr,
-                    f"Rollback reason: {rollback_reason}"
+
+                    f"Rollback reason: "
+                    f"{rollback_reason}"
+
                 )
+
 
                 st.success(
                     "✅ Rollback recorded successfully."
                 )
 
+
                 st.info(
-                    "The prototype has recorded the rollback. "
                     "No real source code was changed."
                 )
+
 
     if st.session_state.rollback_log:
 
         st.divider()
 
-        st.subheader("📜 Rollback History")
+        st.subheader(
+            "📜 Rollback History"
+        )
 
         rollback_df = pd.DataFrame(
             st.session_state.rollback_log
@@ -751,24 +1271,33 @@ elif page == "🔄 Rollback Manager":
 
 elif page == "⚠️ Risk Checker":
 
-    st.title("⚠️ Risk Checker")
+    st.title(
+        "⚠️ Risk Checker"
+    )
 
     selected_pr = st.selectbox(
+
         "Select PR",
+
         pull_requests["PR_ID"].tolist()
     )
 
     pr = pull_requests[
-        pull_requests["PR_ID"] == selected_pr
+        pull_requests["PR_ID"]
+        == selected_pr
     ].iloc[0]
 
+
     text = (
+
         pr["Title"]
         + " "
         + pr["Description"]
         + " "
         + pr["Resolution"]
+
     )
+
 
     if is_high_impact(text):
 
@@ -778,12 +1307,6 @@ elif page == "⚠️ Risk Checker":
 
         st.write(
             "Human confirmation is required."
-        )
-
-        st.write(
-            "Reason: The change contains keywords related to "
-            "security, authentication, database, permissions, "
-            "or other sensitive operations."
         )
 
     else:
@@ -798,12 +1321,182 @@ elif page == "⚠️ Risk Checker":
 
 
 # ============================================================
+# EDGE CASES
+# ============================================================
+
+elif page == "🧪 Edge Cases":
+
+    st.title(
+        "🧪 Edge & Failure Cases"
+    )
+
+    st.write(
+        "The prototype tests how the assistant behaves "
+        "when important information or approval is missing."
+    )
+
+
+    # ========================================================
+    # CASE 1
+    # ========================================================
+
+    st.subheader(
+        "1️⃣ Missing Incident Data"
+    )
+
+    st.write(
+        "Expected behavior: The system should not crash."
+    )
+
+    st.info(
+        "The runbook should show that incident evidence "
+        "is missing and mark the runbook as incomplete."
+    )
+
+
+    # ========================================================
+    # CASE 2
+    # ========================================================
+
+    st.subheader(
+        "2️⃣ Pending Reviewer Approval"
+    )
+
+    st.write(
+        "Expected behavior: The system should not "
+        "automatically approve the runbook."
+    )
+
+    st.warning(
+        "Human reviewer approval is required."
+    )
+
+
+    # ========================================================
+    # CASE 3
+    # ========================================================
+
+    st.subheader(
+        "3️⃣ Missing Code Diff"
+    )
+
+    st.write(
+        "Expected behavior: The system should generate "
+        "an incomplete runbook instead of pretending "
+        "the evidence exists."
+    )
+
+    st.warning(
+        "Code verification is incomplete."
+    )
+
+
+    # ========================================================
+    # CASE 4
+    # ========================================================
+
+    st.subheader(
+        "4️⃣ High-Impact Change"
+    )
+
+    st.write(
+        "Expected behavior: A human must confirm the action."
+    )
+
+    st.error(
+        "🚨 High-impact actions require human confirmation."
+    )
+
+
+    # ========================================================
+    # CASE 5
+    # ========================================================
+
+    st.subheader(
+        "5️⃣ Rollback Without Reason"
+    )
+
+    st.write(
+        "Expected behavior: Rollback should be blocked "
+        "until a reason is provided."
+    )
+
+    st.error(
+        "❌ Rollback without a reason is blocked."
+    )
+
+
+    st.divider()
+
+    st.subheader(
+        "📊 Edge Case Summary"
+    )
+
+    edge_data = pd.DataFrame({
+
+        "Edge Case": [
+
+            "Missing Incident",
+
+            "Pending Review",
+
+            "Missing Code Diff",
+
+            "High-Impact Action",
+
+            "Rollback Without Reason"
+
+        ],
+
+        "System Response": [
+
+            "Warning",
+
+            "Approval Required",
+
+            "Incomplete Runbook",
+
+            "Human Confirmation",
+
+            "Action Blocked"
+
+        ],
+
+        "Status": [
+
+            "Handled",
+
+            "Handled",
+
+            "Handled",
+
+            "Handled",
+
+            "Handled"
+
+        ]
+
+    })
+
+
+    st.dataframe(
+
+        edge_data,
+
+        use_container_width=True
+
+    )
+
+
+# ============================================================
 # AUDIT TRAIL
 # ============================================================
 
 elif page == "📝 Audit Trail":
 
-    st.title("📝 Complete Audit Trail")
+    st.title(
+        "📝 Complete Audit Trail"
+    )
 
     if not st.session_state.audit_log:
 
@@ -822,7 +1515,9 @@ elif page == "📝 Audit Trail":
             use_container_width=True
         )
 
-        st.subheader("🔍 Audit Summary")
+        st.subheader(
+            "🔍 Audit Summary"
+        )
 
         col1, col2, col3 = st.columns(3)
 
@@ -832,21 +1527,29 @@ elif page == "📝 Audit Trail":
         )
 
         col2.metric(
+
             "API Events",
+
             len(
                 audit_df[
-                    audit_df["Action"] == "API Data Received"
+                    audit_df["Action"]
+                    == "API Data Received"
                 ]
             )
+
         )
 
         col3.metric(
+
             "Rollback Events",
+
             len(
                 audit_df[
-                    audit_df["Action"] == "Rollback Recorded"
+                    audit_df["Action"]
+                    == "Rollback Recorded"
                 ]
             )
+
         )
 
 
@@ -856,74 +1559,105 @@ elif page == "📝 Audit Trail":
 
 elif page == "📊 Experiment":
 
-    st.title("📊 Validation Experiment")
+    st.title(
+        "📊 Validation Experiment"
+    )
 
     st.write(
-        "Measure whether the assistant reduces the time required "
-        "for a new engineer to repeat a known fix."
+        "Measure whether the assistant reduces "
+        "the time required to repeat a known fix."
     )
 
-    st.subheader("⏱️ Enter Experiment Times")
+    st.subheader(
+        "⏱️ Enter Experiment Times"
+    )
+
 
     baseline = st.number_input(
+
         "Baseline time without assistant (minutes)",
+
         min_value=1.0,
+
         value=60.0
+
     )
+
 
     assistant_time = st.number_input(
+
         "Time with assistant (minutes)",
+
         min_value=1.0,
+
         value=30.0
+
     )
 
-    if st.button("📈 Calculate Result"):
+
+    if st.button(
+        "📈 Calculate Result"
+    ):
 
         reduction = (
+
             (baseline - assistant_time)
             / baseline
+
         ) * 100
 
+
         st.success(
-            f"Time reduction: {reduction:.2f}%"
+
+            f"Time reduction: "
+            f"{reduction:.2f}%"
+
         )
+
 
         col1, col2, col3 = st.columns(3)
 
+
         col1.metric(
+
             "Baseline",
+
             f"{baseline:.1f} min"
+
         )
+
 
         col2.metric(
+
             "With Assistant",
+
             f"{assistant_time:.1f} min"
+
         )
+
 
         col3.metric(
+
             "Reduction",
+
             f"{reduction:.2f}%"
+
         )
 
-        st.subheader("🎯 Experiment Interpretation")
 
         if reduction > 0:
 
-            st.write(
-                "The assistant reduced the time required to repeat the fix."
+            st.success(
+                "The assistant reduced the time "
+                "required to repeat the fix."
             )
 
         else:
 
-            st.write(
-                "The assistant did not reduce the measured time."
+            st.warning(
+                "The assistant did not reduce "
+                "the measured time."
             )
-
-        st.subheader("📌 Example Target")
-
-        st.info(
-            "Example: Reduce known-fix reproduction time by at least 30%."
-        )
 
 
 # ============================================================
