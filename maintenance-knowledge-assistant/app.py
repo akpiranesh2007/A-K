@@ -10,18 +10,172 @@ from datetime import datetime
 
 st.set_page_config(
     page_title="Maintenance Knowledge Assistant",
-    page_icon="🛠️",
-    layout="wide"
+    page_icon="🧠",
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
 
 
 # ============================================================
-# DATA LOADING
+# CUSTOM THEME
+# Dark Purple + Cyan
+# ============================================================
+
+st.markdown("""
+<style>
+
+    /* Main background */
+    .stApp {
+        background-color: #0F1020;
+        color: #F5F5F7;
+    }
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {
+        background-color: #17182B;
+        border-right: 1px solid #303252;
+    }
+
+    /* Sidebar text */
+    section[data-testid="stSidebar"] * {
+        color: #F5F5F7;
+    }
+
+    /* Main headings */
+    h1 {
+        color: #7C83FD !important;
+        font-weight: 700 !important;
+    }
+
+    h2 {
+        color: #67E8F9 !important;
+    }
+
+    h3 {
+        color: #C4B5FD !important;
+    }
+
+    /* Normal text */
+    p, label {
+        color: #E5E7EB !important;
+    }
+
+    /* Metric cards */
+    div[data-testid="metric-container"] {
+        background-color: #191B32;
+        border: 1px solid #34365A;
+        border-radius: 14px;
+        padding: 15px;
+        box-shadow: 0 4px 15px rgba(0,0,0,0.25);
+    }
+
+    div[data-testid="metric-container"] label {
+        color: #A5B4FC !important;
+    }
+
+    div[data-testid="metric-container"] div {
+        color: #67E8F9 !important;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        background-color: #6366F1;
+        color: white;
+        border: none;
+        border-radius: 10px;
+        padding: 8px 18px;
+        font-weight: 600;
+    }
+
+    .stButton > button:hover {
+        background-color: #7C3AED;
+        color: white;
+    }
+
+    /* Info boxes */
+    div[data-testid="stAlert"] {
+        border-radius: 12px;
+    }
+
+    /* Dataframes */
+    div[data-testid="stDataFrame"] {
+        border: 1px solid #34365A;
+        border-radius: 12px;
+    }
+
+    /* Text inputs */
+    input, textarea {
+        background-color: #191B32 !important;
+        color: white !important;
+        border: 1px solid #3B3D66 !important;
+        border-radius: 8px !important;
+    }
+
+    /* Select boxes */
+    div[data-baseweb="select"] > div {
+        background-color: #191B32;
+        border: 1px solid #3B3D66;
+        border-radius: 8px;
+    }
+
+    /* Code */
+    code {
+        color: #67E8F9 !important;
+    }
+
+    /* Divider */
+    hr {
+        border-color: #303252;
+    }
+
+    /* Custom project banner */
+    .project-banner {
+        background: linear-gradient(
+            135deg,
+            #312E81,
+            #4C1D95,
+            #155E75
+        );
+        padding: 25px;
+        border-radius: 18px;
+        margin-bottom: 25px;
+        border: 1px solid #6366F1;
+    }
+
+    .project-banner h1 {
+        color: white !important;
+        margin-bottom: 5px;
+    }
+
+    .project-banner p {
+        color: #CFFAFE !important;
+        font-size: 17px;
+    }
+
+    /* Status card */
+    .status-card {
+        background-color: #191B32;
+        border: 1px solid #34365A;
+        padding: 18px;
+        border-radius: 14px;
+        margin-top: 10px;
+    }
+
+</style>
+""", unsafe_allow_html=True)
+
+
+# ============================================================
+# DATA PATH
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
 
+
+# ============================================================
+# LOAD DATA
+# ============================================================
 
 @st.cache_data
 def load_data():
@@ -61,9 +215,7 @@ try:
 
 except Exception as e:
 
-    st.error(
-        "❌ Unable to load the data files."
-    )
+    st.error("Unable to load project data.")
 
     st.code("""
 maintenance-knowledge-assistant/
@@ -79,8 +231,7 @@ maintenance-knowledge-assistant/
     └── reviews.csv
 """)
 
-    st.error(f"Error: {e}")
-
+    st.error(str(e))
     st.stop()
 
 
@@ -105,7 +256,7 @@ if "experiment_results" not in st.session_state:
 
 
 # ============================================================
-# AUDIT FUNCTION
+# AUDIT
 # ============================================================
 
 def add_audit(action, pr_id, details):
@@ -129,13 +280,12 @@ def add_audit(action, pr_id, details):
 
 
 # ============================================================
-# RISK CHECKER
+# RISK CHECK
 # ============================================================
 
 def is_high_impact(text):
 
     keywords = [
-
         "authentication",
         "security",
         "password",
@@ -144,7 +294,6 @@ def is_high_impact(text):
         "payment",
         "delete",
         "production"
-
     ]
 
     text = str(text).lower()
@@ -168,8 +317,7 @@ def generate_runbook(pr_id):
     if len(pr_rows) == 0:
 
         return {
-            "error":
-                "Pull Request not found."
+            "error": "Pull Request not found."
         }
 
     pr = pr_rows.iloc[0]
@@ -187,15 +335,10 @@ def generate_runbook(pr_id):
     ]
 
 
-    # --------------------------------------------------------
-    # INCIDENT CHECK
-    # --------------------------------------------------------
-
+    # Incident
     if len(incident_rows) == 0:
 
-        incident_problem = (
-            "Incident information is missing."
-        )
+        incident_problem = "Incident information is missing."
 
         incident_discussion = (
             "Root cause cannot be fully verified."
@@ -214,10 +357,7 @@ def generate_runbook(pr_id):
         incident_available = True
 
 
-    # --------------------------------------------------------
-    # CODE DIFF CHECK
-    # --------------------------------------------------------
-
+    # Code diff
     if len(diff_rows) == 0:
 
         changed_file = "Code diff unavailable."
@@ -241,10 +381,7 @@ def generate_runbook(pr_id):
         diff_available = True
 
 
-    # --------------------------------------------------------
-    # REVIEW CHECK
-    # --------------------------------------------------------
-
+    # Review
     if len(review_rows) == 0:
 
         reviewer_status = "Unknown"
@@ -262,10 +399,7 @@ def generate_runbook(pr_id):
         verification = review["Comment"]
 
 
-    # --------------------------------------------------------
-    # CONFIDENCE
-    # --------------------------------------------------------
-
+    # Confidence
     confidence = 40
 
     if incident_available:
@@ -277,16 +411,10 @@ def generate_runbook(pr_id):
     if reviewer_status == "Approved":
         confidence += 30
 
-    confidence = min(
-        confidence,
-        100
-    )
+    confidence = min(confidence, 100)
 
 
-    # --------------------------------------------------------
-    # VERIFICATION STATUS
-    # --------------------------------------------------------
-
+    # Verification
     if not incident_available:
 
         verification_status = (
@@ -311,62 +439,45 @@ def generate_runbook(pr_id):
 
 
     high_impact = is_high_impact(
-
         pr["Title"]
         + " "
         + pr["Description"]
         + " "
         + pr["Resolution"]
-
     )
 
 
     return {
 
-        "PR_ID":
-            pr_id,
+        "PR_ID": pr_id,
 
-        "Title":
-            pr["Title"],
+        "Title": pr["Title"],
 
-        "Problem":
-            incident_problem,
+        "Problem": incident_problem,
 
-        "Root_Cause":
-            incident_discussion,
+        "Root_Cause": incident_discussion,
 
-        "Solution":
-            pr["Resolution"],
+        "Solution": pr["Resolution"],
 
-        "Changed_File":
-            changed_file,
+        "Changed_File": changed_file,
 
-        "Old_Code":
-            old_code,
+        "Old_Code": old_code,
 
-        "New_Code":
-            new_code,
+        "New_Code": new_code,
 
-        "Verification":
-            verification,
+        "Verification": verification,
 
-        "Reviewer_Status":
-            reviewer_status,
+        "Reviewer_Status": reviewer_status,
 
-        "Verification_Status":
-            verification_status,
+        "Verification_Status": verification_status,
 
-        "Confidence":
-            confidence,
+        "Confidence": confidence,
 
-        "High_Impact":
-            high_impact,
+        "High_Impact": high_impact,
 
-        "Incident_Available":
-            incident_available,
+        "Incident_Available": incident_available,
 
-        "Diff_Available":
-            diff_available
+        "Diff_Available": diff_available
     }
 
 
@@ -374,13 +485,20 @@ def generate_runbook(pr_id):
 # SIDEBAR
 # ============================================================
 
-st.sidebar.title(
-    "🛠️ Maintenance Assistant"
+st.sidebar.markdown(
+    """
+    <h2 style="color:#67E8F9;">🧠 MKA</h2>
+    <p style="color:#A5B4FC;">
+    Maintenance Knowledge Assistant
+    </p>
+    """,
+    unsafe_allow_html=True
 )
+
 
 page = st.sidebar.radio(
 
-    "Navigation",
+    "MENU",
 
     [
 
@@ -410,20 +528,35 @@ page = st.sidebar.radio(
 )
 
 
+st.sidebar.divider()
+
+st.sidebar.caption(
+    "Synthetic / Anonymised Dataset"
+)
+
+
 # ============================================================
 # DASHBOARD
 # ============================================================
 
 if page == "🏠 Dashboard":
 
-    st.title(
-        "🛠️ Maintenance Knowledge-Capture Assistant"
+    st.markdown(
+        """
+        <div class="project-banner">
+
+        <h1>🧠 Maintenance Knowledge-Capture Assistant</h1>
+
+        <p>
+        Convert completed software fixes into verified,
+        reusable maintenance knowledge.
+        </p>
+
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
-    st.write(
-        "Convert completed software fixes into "
-        "verified and reusable runbooks."
-    )
 
     col1, col2, col3, col4 = st.columns(4)
 
@@ -438,7 +571,7 @@ if page == "🏠 Dashboard":
     )
 
     col3.metric(
-        "Generated Runbooks",
+        "Runbooks",
         len(st.session_state.runbooks)
     )
 
@@ -447,39 +580,42 @@ if page == "🏠 Dashboard":
         len(st.session_state.audit_log)
     )
 
+
     st.divider()
 
+
     st.subheader(
-        "🔄 System Workflow"
+        "🔄 Knowledge Capture Workflow"
     )
 
     st.info(
         """
-Completed Fix
-↓
-Pull Request
-↓
-Incident Discussion
-↓
-Code Diff
-↓
-Reviewer Approval
-↓
-Runbook Generation
-↓
-Human Verification
-↓
-Verified Knowledge
-"""
+        Completed Fix
+        ↓
+        Pull Request
+        ↓
+        Incident Discussion
+        ↓
+        Code Diff
+        ↓
+        Reviewer Approval
+        ↓
+        Runbook Generation
+        ↓
+        Human Verification
+        ↓
+        Reusable Knowledge
+        """
     )
 
+
     st.subheader(
-        "🎯 Project Goal"
+        "🎯 Project Objective"
     )
 
     st.write(
         "Reduce the time required for a new engineer "
-        "to repeat a known fix."
+        "to repeat a known software fix."
     )
 
 
@@ -498,20 +634,20 @@ elif page == "📋 Pull Requests":
         use_container_width=True
     )
 
+
     st.subheader(
-        "Pull Request Details"
+        "PR Details"
     )
 
     selected_pr = st.selectbox(
-
-        "Select PR",
-
+        "Select Pull Request",
         pull_requests["PR_ID"].tolist()
     )
 
     pr = pull_requests[
         pull_requests["PR_ID"] == selected_pr
     ].iloc[0]
+
 
     st.write(
         "### Title"
@@ -521,6 +657,7 @@ elif page == "📋 Pull Requests":
         pr["Title"]
     )
 
+
     st.write(
         "### Description"
     )
@@ -528,6 +665,7 @@ elif page == "📋 Pull Requests":
     st.write(
         pr["Description"]
     )
+
 
     st.write(
         "### Resolution"
@@ -537,6 +675,7 @@ elif page == "📋 Pull Requests":
         pr["Resolution"]
     )
 
+
     st.write(
         "### Reviewer"
     )
@@ -544,6 +683,7 @@ elif page == "📋 Pull Requests":
     st.write(
         pr["Reviewer"]
     )
+
 
     st.write(
         "### Status"
@@ -569,10 +709,9 @@ elif page == "🚨 Incidents":
         use_container_width=True
     )
 
+
     selected_incident = st.selectbox(
-
         "Select Incident",
-
         incidents["Incident_ID"].tolist()
     )
 
@@ -580,6 +719,7 @@ elif page == "🚨 Incidents":
         incidents["Incident_ID"]
         == selected_incident
     ].iloc[0]
+
 
     st.write(
         "### Problem"
@@ -589,6 +729,7 @@ elif page == "🚨 Incidents":
         incident["Problem"]
     )
 
+
     st.write(
         "### Team Discussion"
     )
@@ -596,6 +737,7 @@ elif page == "🚨 Incidents":
     st.write(
         incident["Discussion"]
     )
+
 
     st.write(
         "### Final Resolution"
@@ -617,11 +759,10 @@ elif page == "📘 Generate Runbook":
     )
 
     selected_pr = st.selectbox(
-
         "Select Pull Request",
-
         pull_requests["PR_ID"].tolist()
     )
+
 
     if st.button(
         "🚀 Generate Runbook"
@@ -630,6 +771,7 @@ elif page == "📘 Generate Runbook":
         runbook = generate_runbook(
             selected_pr
         )
+
 
         if "error" in runbook:
 
@@ -649,24 +791,25 @@ elif page == "📘 Generate Runbook":
 
                 selected_pr,
 
-                "Runbook created from available evidence."
+                "Runbook generated from available evidence."
 
             )
 
             st.success(
-                "✅ Runbook generated successfully!"
+                "✅ Runbook generated successfully."
             )
 
 
     if st.session_state.runbooks:
 
+        rb = st.session_state.runbooks[-1]
+
         st.divider()
 
         st.subheader(
-            "Latest Runbook"
+            "📘 Generated Runbook"
         )
 
-        rb = st.session_state.runbooks[-1]
 
         st.write(
             "### Problem"
@@ -676,6 +819,7 @@ elif page == "📘 Generate Runbook":
             rb["Problem"]
         )
 
+
         st.write(
             "### Root Cause"
         )
@@ -683,6 +827,7 @@ elif page == "📘 Generate Runbook":
         st.write(
             rb["Root_Cause"]
         )
+
 
         st.write(
             "### Solution"
@@ -692,6 +837,7 @@ elif page == "📘 Generate Runbook":
             rb["Solution"]
         )
 
+
         st.write(
             "### Changed File"
         )
@@ -700,23 +846,34 @@ elif page == "📘 Generate Runbook":
             rb["Changed_File"]
         )
 
-        st.write(
-            "### Previous Code"
-        )
-
-        st.code(
-            rb["Old_Code"]
-        )
-
-        st.write(
-            "### New Code"
-        )
-
-        st.code(
-            rb["New_Code"]
-        )
 
         col1, col2 = st.columns(2)
+
+
+        with col1:
+
+            st.write(
+                "### Previous Code"
+            )
+
+            st.code(
+                rb["Old_Code"]
+            )
+
+
+        with col2:
+
+            st.write(
+                "### New Code"
+            )
+
+            st.code(
+                rb["New_Code"]
+            )
+
+
+        col1, col2 = st.columns(2)
+
 
         col1.metric(
             "Confidence",
@@ -728,27 +885,31 @@ elif page == "📘 Generate Runbook":
             rb["Verification_Status"]
         )
 
+
         if not rb["Incident_Available"]:
 
             st.warning(
-                "⚠️ Incident data is missing."
+                "⚠️ Incident evidence is missing."
             )
+
 
         if not rb["Diff_Available"]:
 
             st.warning(
-                "⚠️ Code diff is missing."
+                "⚠️ Code diff evidence is missing."
             )
+
 
         if rb["Reviewer_Status"] != "Approved":
 
             st.warning(
-                "⚠️ Reviewer approval is required."
+                "⏳ Reviewer approval is required."
             )
+
 
         if rb["High_Impact"]:
 
-            st.warning(
+            st.error(
                 "🚨 High-impact change detected."
             )
 
@@ -760,8 +921,9 @@ elif page == "📘 Generate Runbook":
 elif page == "✅ Review Runbooks":
 
     st.title(
-        "✅ Review Runbooks"
+        "✅ Human Review"
     )
+
 
     if not st.session_state.runbooks:
 
@@ -781,15 +943,11 @@ elif page == "✅ Review Runbooks":
                 f'{rb["PR_ID"]} - {rb["Title"]}'
             )
 
-            st.write(
-                f'**Confidence:** '
-                f'{rb["Confidence"]}%'
-            )
 
             st.write(
-                f'**Status:** '
-                f'{rb["Verification_Status"]}'
+                f'Confidence: {rb["Confidence"]}%'
             )
+
 
             if (
                 not rb["Incident_Available"]
@@ -797,19 +955,22 @@ elif page == "✅ Review Runbooks":
             ):
 
                 st.error(
-                    "❌ Required evidence is missing. "
-                    "Approval is blocked."
+                    "❌ Approval blocked because "
+                    "required evidence is missing."
                 )
 
                 continue
+
 
             if rb["Reviewer_Status"] != "Approved":
 
                 st.warning(
-                    "⏳ Reviewer approval is required."
+                    "⏳ Approval blocked until "
+                    "reviewer approval is available."
                 )
 
                 continue
+
 
             if rb["High_Impact"]:
 
@@ -826,7 +987,9 @@ elif page == "✅ Review Runbooks":
 
                 confirmation = True
 
+
             col1, col2 = st.columns(2)
+
 
             with col1:
 
@@ -843,7 +1006,7 @@ elif page == "✅ Review Runbooks":
 
                             rb["PR_ID"],
 
-                            "Human reviewer approved the runbook."
+                            "Human approval recorded."
 
                         )
 
@@ -857,19 +1020,24 @@ elif page == "✅ Review Runbooks":
                             "Human confirmation required."
                         )
 
+
             with col2:
 
                 reason = st.text_input(
 
                     "Rejection reason",
 
-                    key=f"reason_{i}"
+                    key=f"reject_reason_{i}"
 
                 )
 
+
                 if st.button(
+
                     "❌ Reject",
+
                     key=f"reject_{i}"
+
                 ):
 
                     if reason.strip():
@@ -906,19 +1074,22 @@ elif page == "🔌 API Integration":
     )
 
     st.write(
-        "Simulated connection between an external "
-        "engineering system and the assistant."
+        "Mock API showing how an external engineering "
+        "system can send maintenance information."
     )
+
 
     selected_pr = st.selectbox(
 
-        "Select PR to send",
+        "Select PR",
 
         pull_requests["PR_ID"].tolist()
+
     )
 
+
     if st.button(
-        "📤 Send PR to Assistant"
+        "📤 Send Data"
     ):
 
         pr = pull_requests[
@@ -926,20 +1097,24 @@ elif page == "🔌 API Integration":
             == selected_pr
         ].iloc[0]
 
+
         incident_rows = incidents[
             incidents["PR_ID"]
             == selected_pr
         ]
+
 
         diff_rows = code_diffs[
             code_diffs["PR_ID"]
             == selected_pr
         ]
 
+
         review_rows = reviews[
             reviews["PR_ID"]
             == selected_pr
         ]
+
 
         payload = {
 
@@ -985,19 +1160,27 @@ elif page == "🔌 API Integration":
                 )
         }
 
+
         st.session_state.api_records.append(
             payload
         )
 
+
         add_audit(
+
             "API Data Received",
+
             selected_pr,
-            "Maintenance data received through mock API."
+
+            "Data received through mock API."
+
         )
 
+
         st.success(
-            "✅ Data received through mock API."
+            "✅ API data received successfully."
         )
+
 
         st.json(
             payload
@@ -1005,7 +1188,7 @@ elif page == "🔌 API Integration":
 
 
 # ============================================================
-# ROLLBACK MANAGER
+# ROLLBACK
 # ============================================================
 
 elif page == "🔄 Rollback Manager":
@@ -1014,27 +1197,32 @@ elif page == "🔄 Rollback Manager":
         "🔄 Rollback Manager"
     )
 
+
     st.warning(
-        "⚠️ Prototype simulation. "
-        "Real production code is not modified."
+        "Prototype simulation — no real production code "
+        "is modified."
     )
+
 
     selected_pr = st.selectbox(
 
-        "Select PR for rollback",
+        "Select PR",
 
         pull_requests["PR_ID"].tolist()
+
     )
+
 
     diff_rows = code_diffs[
         code_diffs["PR_ID"]
         == selected_pr
     ]
 
+
     if len(diff_rows) == 0:
 
         st.error(
-            "❌ No code diff found."
+            "❌ Code diff unavailable."
         )
 
     else:
@@ -1046,6 +1234,7 @@ elif page == "🔄 Rollback Manager":
             == selected_pr
         ].iloc[0]
 
+
         high_impact = is_high_impact(
 
             pr["Title"]
@@ -1054,11 +1243,9 @@ elif page == "🔄 Rollback Manager":
 
         )
 
-        st.write(
-            f"**File:** {diff['File']}"
-        )
 
         col1, col2 = st.columns(2)
+
 
         with col1:
 
@@ -1070,6 +1257,7 @@ elif page == "🔄 Rollback Manager":
                 str(diff["Old_Code"])
             )
 
+
         with col2:
 
             st.write(
@@ -1079,6 +1267,7 @@ elif page == "🔄 Rollback Manager":
             st.code(
                 str(diff["New_Code"])
             )
+
 
         if high_impact:
 
@@ -1095,9 +1284,11 @@ elif page == "🔄 Rollback Manager":
 
             confirmation = True
 
+
         reason = st.text_area(
-            "Rollback reason"
+            "Rollback Reason"
         )
+
 
         if st.button(
             "🔄 Confirm Rollback"
@@ -1107,7 +1298,7 @@ elif page == "🔄 Rollback Manager":
 
                 st.error(
                     "❌ Rollback blocked: "
-                    "reason is required."
+                    "reason required."
                 )
 
             elif not confirmation:
@@ -1141,9 +1332,11 @@ elif page == "🔄 Rollback Manager":
                         "Rollback Recorded"
                 }
 
+
                 st.session_state.rollback_log.append(
                     record
                 )
+
 
                 add_audit(
 
@@ -1154,6 +1347,7 @@ elif page == "🔄 Rollback Manager":
                     reason
 
                 )
+
 
                 st.success(
                     "✅ Rollback recorded."
@@ -1187,17 +1381,21 @@ elif page == "⚠️ Risk Checker":
         "⚠️ Risk Checker"
     )
 
+
     selected_pr = st.selectbox(
 
         "Select PR",
 
         pull_requests["PR_ID"].tolist()
+
     )
+
 
     pr = pull_requests[
         pull_requests["PR_ID"]
         == selected_pr
     ].iloc[0]
+
 
     text = (
 
@@ -1209,10 +1407,11 @@ elif page == "⚠️ Risk Checker":
 
     )
 
+
     if is_high_impact(text):
 
         st.error(
-            "🚨 HIGH-IMPACT ACTION DETECTED"
+            "🚨 HIGH-IMPACT CHANGE"
         )
 
         st.write(
@@ -1236,10 +1435,6 @@ elif page == "🧪 Edge Cases":
         "🧪 Edge & Failure Cases"
     )
 
-    st.write(
-        "The assistant handles incomplete or risky information "
-        "without silently accepting it."
-    )
 
     edge_data = pd.DataFrame({
 
@@ -1247,27 +1442,27 @@ elif page == "🧪 Edge Cases":
 
             "Missing Incident",
 
-            "Pending Review",
+            "Pending Reviewer",
 
             "Missing Code Diff",
 
-            "High-Impact Action",
+            "High-Impact Change",
 
             "Rollback Without Reason"
 
         ],
 
-        "Expected Response": [
+        "System Response": [
 
-            "Show warning",
+            "Warning",
 
-            "Require approval",
+            "Approval Blocked",
 
-            "Mark incomplete",
+            "Incomplete Runbook",
 
-            "Require confirmation",
+            "Human Confirmation",
 
-            "Block rollback"
+            "Rollback Blocked"
 
         ],
 
@@ -1287,9 +1482,18 @@ elif page == "🧪 Edge Cases":
 
     })
 
+
     st.dataframe(
+
         edge_data,
+
         use_container_width=True
+
+    )
+
+
+    st.success(
+        "✅ All required edge cases are handled."
     )
 
 
@@ -1300,8 +1504,9 @@ elif page == "🧪 Edge Cases":
 elif page == "📝 Audit Trail":
 
     st.title(
-        "📝 Complete Audit Trail"
+        "📝 Audit Trail"
     )
+
 
     if not st.session_state.audit_log:
 
@@ -1315,17 +1520,27 @@ elif page == "📝 Audit Trail":
             st.session_state.audit_log
         )
 
+
         st.dataframe(
+
             audit_df,
+
             use_container_width=True
+
         )
+
 
         col1, col2, col3 = st.columns(3)
 
+
         col1.metric(
+
             "Total Events",
+
             len(audit_df)
+
         )
+
 
         col2.metric(
 
@@ -1339,6 +1554,7 @@ elif page == "📝 Audit Trail":
             )
 
         )
+
 
         col3.metric(
 
@@ -1364,29 +1580,35 @@ elif page == "📊 Validation Dashboard":
         "📊 Validation & Metrics Dashboard"
     )
 
+
     st.write(
-        "Measure whether the Maintenance Knowledge Assistant "
-        "reduces the time needed to repeat known fixes."
+        "Measure whether the assistant reduces "
+        "the time needed to repeat known fixes."
     )
+
 
     st.divider()
 
-    # --------------------------------------------------------
-    # INPUT SECTION
-    # --------------------------------------------------------
+
+    # ========================================================
+    # ADD TEST
+    # ========================================================
 
     st.subheader(
         "1️⃣ Add Experiment Result"
     )
 
+
     col1, col2, col3 = st.columns(3)
+
 
     with col1:
 
         test_case = st.text_input(
             "Test Case",
-            placeholder="Example: Redis timeout fix"
+            placeholder="Redis timeout fix"
         )
+
 
     with col2:
 
@@ -1401,6 +1623,7 @@ elif page == "📊 Validation Dashboard":
             step=1.0
 
         )
+
 
     with col3:
 
@@ -1430,20 +1653,19 @@ elif page == "📊 Validation Dashboard":
     )
 
 
-    error_reason = st.text_input(
+    observation = st.text_input(
 
         "Error / Observation",
 
         placeholder=(
-            "Example: Engineer needed clarification "
-            "about the verification step."
+            "Example: Engineer needed clarification."
         )
 
     )
 
 
     if st.button(
-        "➕ Add Experiment Result"
+        "➕ Add Experiment"
     ):
 
         if not test_case.strip():
@@ -1455,9 +1677,12 @@ elif page == "📊 Validation Dashboard":
         else:
 
             time_saved = (
+
                 baseline_time
                 - assistant_time
+
             )
+
 
             reduction = (
 
@@ -1467,7 +1692,7 @@ elif page == "📊 Validation Dashboard":
             ) * 100
 
 
-            experiment = {
+            result = {
 
                 "Test Case":
                     test_case,
@@ -1479,27 +1704,33 @@ elif page == "📊 Validation Dashboard":
                     assistant_time,
 
                 "Time Saved (min)":
-                    time_saved,
+                    round(
+                        time_saved,
+                        2
+                    ),
 
                 "Reduction (%)":
-                    round(reduction, 2),
+                    round(
+                        reduction,
+                        2
+                    ),
 
                 "Result":
                     result_status,
 
                 "Observation":
-                    error_reason
+                    observation
             }
 
 
             st.session_state.experiment_results.append(
-                experiment
+                result
             )
 
 
             add_audit(
 
-                "Experiment Result Added",
+                "Experiment Added",
 
                 "N/A",
 
@@ -1509,13 +1740,13 @@ elif page == "📊 Validation Dashboard":
 
 
             st.success(
-                "✅ Experiment result added."
+                "✅ Experiment added."
             )
 
 
-    # --------------------------------------------------------
+    # ========================================================
     # RESULTS
-    # --------------------------------------------------------
+    # ========================================================
 
     if st.session_state.experiment_results:
 
@@ -1525,9 +1756,13 @@ elif page == "📊 Validation Dashboard":
             "2️⃣ Experiment Results"
         )
 
+
         results_df = pd.DataFrame(
+
             st.session_state.experiment_results
+
         )
+
 
         st.dataframe(
 
@@ -1538,29 +1773,34 @@ elif page == "📊 Validation Dashboard":
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # METRICS
-        # ----------------------------------------------------
+        # ====================================================
 
         st.subheader(
-            "3️⃣ Key Metrics"
+            "3️⃣ Key Performance Metrics"
         )
+
 
         avg_baseline = results_df[
             "Baseline (min)"
         ].mean()
 
+
         avg_assistant = results_df[
             "Assistant (min)"
         ].mean()
+
 
         avg_saved = results_df[
             "Time Saved (min)"
         ].mean()
 
+
         avg_reduction = results_df[
             "Reduction (%)"
         ].mean()
+
 
         success_count = len(
 
@@ -1571,55 +1811,57 @@ elif page == "📊 Validation Dashboard":
 
         )
 
+
         total_tests = len(
             results_df
         )
 
 
+        success_rate = (
+
+            success_count
+            / total_tests
+
+        ) * 100
+
+
         col1, col2, col3, col4 = st.columns(4)
+
 
         col1.metric(
 
-            "Average Baseline",
+            "Avg. Baseline",
 
             f"{avg_baseline:.1f} min"
 
         )
 
+
         col2.metric(
 
-            "Average Assistant",
+            "Avg. Assistant",
 
             f"{avg_assistant:.1f} min"
 
         )
 
+
         col3.metric(
 
-            "Average Time Saved",
+            "Avg. Time Saved",
 
             f"{avg_saved:.1f} min"
 
         )
 
+
         col4.metric(
 
-            "Average Reduction",
+            "Avg. Reduction",
 
             f"{avg_reduction:.1f}%"
 
         )
-
-
-        # ----------------------------------------------------
-        # SUCCESS RATE
-        # ----------------------------------------------------
-
-        success_rate = (
-
-            success_count
-            / total_tests
-        ) * 100
 
 
         st.metric(
@@ -1631,13 +1873,14 @@ elif page == "📊 Validation Dashboard":
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # CHART
-        # ----------------------------------------------------
+        # ====================================================
 
         st.subheader(
-            "4️⃣ Time Comparison"
+            "4️⃣ Baseline vs Assistant"
         )
+
 
         chart_data = results_df[
             [
@@ -1649,36 +1892,42 @@ elif page == "📊 Validation Dashboard":
             "Test Case"
         )
 
+
         st.bar_chart(
             chart_data
         )
 
 
-        # ----------------------------------------------------
+        # ====================================================
         # ERROR ANALYSIS
-        # ----------------------------------------------------
+        # ====================================================
 
         st.subheader(
             "5️⃣ Error Analysis"
         )
 
+
         failures = results_df[
-            results_df["Result"] != "Success"
+            results_df["Result"]
+            != "Success"
         ]
 
 
         if len(failures) == 0:
 
             st.success(
-                "✅ No failed or partial test cases."
+                "✅ No failed test cases."
             )
 
         else:
 
             st.warning(
-                f"{len(failures)} test case(s) "
-                "need further analysis."
+
+                f"{len(failures)} "
+                "test case(s) need analysis."
+
             )
+
 
             st.dataframe(
 
@@ -1695,19 +1944,21 @@ elif page == "📊 Validation Dashboard":
             )
 
 
-        # ----------------------------------------------------
-        # PROJECT TARGET
-        # ----------------------------------------------------
+        # ====================================================
+        # TARGET
+        # ====================================================
 
         st.subheader(
             "6️⃣ Project Target"
         )
 
+
         target = 30
 
+
         st.write(
-            "Target: At least 30% reduction in "
-            "known-fix reproduction time."
+            "Target: At least 30% reduction "
+            "in known-fix reproduction time."
         )
 
 
@@ -1731,29 +1982,30 @@ elif page == "📊 Validation Dashboard":
             )
 
 
-        # ----------------------------------------------------
-        # VALIDATION CONCLUSION
-        # ----------------------------------------------------
+        # ====================================================
+        # CONCLUSION
+        # ====================================================
 
         st.subheader(
             "7️⃣ Validation Conclusion"
         )
 
+
         st.info(
 
             f"""
-The experiment tested {total_tests} case(s).
+Test cases completed: {total_tests}
 
-Average time without the assistant:
+Average baseline time:
 {avg_baseline:.1f} minutes
 
-Average time with the assistant:
+Average assistant time:
 {avg_assistant:.1f} minutes
 
 Average time saved:
 {avg_saved:.1f} minutes
 
-Average reduction:
+Average time reduction:
 {avg_reduction:.1f}%
 
 Success rate:
@@ -1765,21 +2017,23 @@ Success rate:
     else:
 
         st.info(
+
             "Add experiment results above to "
-            "generate the validation dashboard."
+            "generate your metrics dashboard."
+
         )
 
 
 # ============================================================
-# SIDEBAR FOOTER
+# FOOTER
 # ============================================================
 
 st.sidebar.divider()
 
 st.sidebar.caption(
-    "Maintenance Knowledge-Capture Assistant"
+    "🧠 MKA Prototype"
 )
 
 st.sidebar.caption(
-    "Prototype using synthetic/anonymised data"
+    "Synthetic / Anonymised Data"
 )
