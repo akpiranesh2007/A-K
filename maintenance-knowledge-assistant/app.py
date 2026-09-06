@@ -16,19 +16,15 @@ st.set_page_config(
 
 
 # ============================================================
-# LOAD CSV DATA
+# LOAD DATA
 # ============================================================
 
 @st.cache_data
 def load_data():
 
-    # Find the folder where app.py is located
     base_dir = Path(__file__).resolve().parent
-
-    # data folder is beside app.py
     data_dir = base_dir / "data"
 
-    # Read CSV files
     pull_requests = pd.read_csv(
         data_dir / "pull_requests.csv"
     )
@@ -54,7 +50,7 @@ def load_data():
 
 
 # ============================================================
-# LOAD DATA WITH ERROR MESSAGE
+# LOAD DATA SAFELY
 # ============================================================
 
 try:
@@ -68,11 +64,9 @@ try:
 
 except Exception as e:
 
-    st.error("❌ Could not load the project data.")
+    st.error("❌ Could not load project data.")
 
-    st.write(
-        "Please make sure the GitHub project has this structure:"
-    )
+    st.write("Required project structure:")
 
     st.code("""
 maintenance-knowledge-assistant/
@@ -102,6 +96,9 @@ if "runbooks" not in st.session_state:
 
 if "audit_log" not in st.session_state:
     st.session_state.audit_log = []
+
+if "api_received" not in st.session_state:
+    st.session_state.api_received = []
 
 
 # ============================================================
@@ -157,7 +154,7 @@ def get_review(pr_id):
 
 
 # ============================================================
-# HIGH IMPACT CHECK
+# RISK CHECK
 # ============================================================
 
 def check_high_impact(text):
@@ -196,19 +193,15 @@ def calculate_confidence(
 
     score = 0
 
-    # Pull request approved
     if str(pr["Status"]).lower() == "approved":
         score += 40
 
-    # Reviewer exists
     if str(review["Reviewer"]) != "Not Assigned":
         score += 20
 
-    # Review approved
     if str(review["Decision"]).lower() == "approved":
         score += 30
 
-    # Incident has verified resolution
     if str(
         incident["Final_Resolution"]
     ) != "Not verified yet":
@@ -224,24 +217,19 @@ def calculate_confidence(
 def generate_runbook(pr_id):
 
     pr = get_pr(pr_id)
-
     incident = get_incident(pr_id)
-
     diff = get_diff(pr_id)
-
     review = get_review(pr_id)
 
     if pr is None:
         return None
 
-    # Calculate confidence
     confidence = calculate_confidence(
         pr,
         incident,
         review
     )
 
-    # Check high impact
     text = (
         str(pr["Title"])
         + " "
@@ -250,7 +238,7 @@ def generate_runbook(pr_id):
         + str(pr["Resolution"])
     )
 
-    high_impact_keywords = check_high_impact(text)
+    risk_keywords = check_high_impact(text)
 
     runbook = {
 
@@ -276,12 +264,10 @@ def generate_runbook(pr_id):
 
         "Confidence": confidence,
 
-        "High_Impact": len(
-            high_impact_keywords
-        ) > 0,
+        "High_Impact": len(risk_keywords) > 0,
 
         "Risk_Keywords": ", ".join(
-            high_impact_keywords
+            risk_keywords
         ),
 
         "Generated_At": datetime.now().strftime(
@@ -317,6 +303,72 @@ def add_audit(
 
 
 # ============================================================
+# MOCK API
+# ============================================================
+
+def mock_api_send(pr_id):
+
+    pr = get_pr(pr_id)
+    incident = get_incident(pr_id)
+    diff = get_diff(pr_id)
+    review = get_review(pr_id)
+
+    if pr is None:
+        return None
+
+    api_payload = {
+
+        "source": "Mock GitHub / Incident API",
+
+        "timestamp": datetime.now().strftime(
+            "%Y-%m-%d %H:%M:%S"
+        ),
+
+        "pull_request": {
+
+            "id": pr["PR_ID"],
+
+            "title": pr["Title"],
+
+            "description": pr["Description"],
+
+            "resolution": pr["Resolution"],
+
+            "status": pr["Status"]
+        },
+
+        "incident": {
+
+            "problem": incident["Problem"],
+
+            "discussion": incident["Discussion"],
+
+            "resolution": incident["Final_Resolution"]
+        },
+
+        "code_change": {
+
+            "file": diff["File"],
+
+            "old_code": diff["Old_Code"],
+
+            "new_code": diff["New_Code"]
+        },
+
+        "review": {
+
+            "reviewer": review["Reviewer"],
+
+            "decision": review["Decision"],
+
+            "comment": review["Comment"]
+        }
+    }
+
+    return api_payload
+
+
+# ============================================================
 # SIDEBAR
 # ============================================================
 
@@ -336,6 +388,7 @@ page = st.sidebar.radio(
         "Dashboard",
         "Pull Requests",
         "Incidents",
+        "🔌 API Integration",
         "Generate Runbook",
         "Review Runbooks",
         "Risk Checker",
@@ -362,7 +415,6 @@ if page == "Dashboard":
 
     st.divider()
 
-    # Metrics
     col1, col2, col3, col4 = st.columns(4)
 
     with col1:
@@ -409,19 +461,19 @@ if page == "Dashboard":
 
     st.info(
         """
-        Completed Pull Request
+Completed Pull Request
         ↓
-        Incident Discussion
+API / Integration
         ↓
-        Code Diff
+Incident + Code Diff + Review
         ↓
-        Reviewer Approval
+Knowledge Extraction
         ↓
-        Runbook Generation
+Runbook Generation
         ↓
-        Human Verification
+Human Verification
         ↓
-        Reusable Maintenance Knowledge
+Reusable Maintenance Knowledge
         """
     )
 
@@ -430,7 +482,7 @@ if page == "Dashboard":
     )
 
     st.write(
-        "Reduce the time required for a new engineer "
+        "Reduce the time required by a new engineer "
         "to repeat a previously solved maintenance fix."
     )
 
@@ -491,28 +543,15 @@ elif page == "Pull Requests":
         pr["Resolution"]
     )
 
-    col1, col2 = st.columns(2)
+    st.write(
+        "**Reviewer:**",
+        pr["Reviewer"]
+    )
 
-    with col1:
-
-        st.write(
-            "**Reviewer:**",
-            pr["Reviewer"]
-        )
-
-    with col2:
-
-        if pr["Status"] == "Approved":
-
-            st.success(
-                "Approved"
-            )
-
-        else:
-
-            st.warning(
-                "Pending"
-            )
+    st.write(
+        "**Status:**",
+        pr["Status"]
+    )
 
 
 # ============================================================
@@ -569,6 +608,120 @@ elif page == "Incidents":
 
 
 # ============================================================
+# API INTEGRATION
+# ============================================================
+
+elif page == "🔌 API Integration":
+
+    st.title(
+        "🔌 API Integration"
+    )
+
+    st.write(
+        "This page simulates an external system "
+        "sending completed maintenance information "
+        "to the Maintenance Knowledge Assistant."
+    )
+
+    st.divider()
+
+    st.subheader(
+        "🔄 Integration Flow"
+    )
+
+    st.info(
+        """
+External System
+       ↓
+     API
+       ↓
+Maintenance Assistant
+       ↓
+Runbook Generation
+       ↓
+Human Review
+        """
+    )
+
+    st.divider()
+
+    st.subheader(
+        "Send Maintenance Fix"
+    )
+
+    pr_id = st.selectbox(
+
+        "Select Pull Request to send",
+
+        pull_requests["PR_ID"].tolist()
+    )
+
+    if st.button(
+        "📤 Send Fix to Assistant",
+        use_container_width=True
+    ):
+
+        payload = mock_api_send(
+            pr_id
+        )
+
+        st.session_state.api_received.append(
+            payload
+        )
+
+        add_audit(
+
+            "API Data Received",
+
+            pr_id,
+
+            "Maintenance information received "
+            "through Mock API."
+        )
+
+        st.success(
+            "✅ API request received successfully!"
+        )
+
+        st.subheader(
+            "📦 Received API Data"
+        )
+
+        st.json(
+            payload
+        )
+
+    st.divider()
+
+    st.subheader(
+        "📡 API Status"
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        st.success(
+            "🟢 API Endpoint: Active"
+        )
+
+    with col2:
+
+        st.metric(
+            "Requests Received",
+            len(
+                st.session_state.api_received
+            )
+        )
+
+    st.caption(
+        "This is a Mock API used for prototype demonstration. "
+        "A real deployment can connect GitHub, incident systems, "
+        "or other engineering tools."
+    )
+
+
+# ============================================================
 # GENERATE RUNBOOK
 # ============================================================
 
@@ -579,7 +732,7 @@ elif page == "Generate Runbook":
     )
 
     st.write(
-        "Select a Pull Request to convert "
+        "Select a Pull Request and convert "
         "the completed fix into reusable documentation."
     )
 
@@ -589,8 +742,6 @@ elif page == "Generate Runbook":
 
         pull_requests["PR_ID"].tolist()
     )
-
-    pr = get_pr(pr_id)
 
     review = get_review(pr_id)
 
@@ -868,8 +1019,8 @@ elif page == "Risk Checker":
     )
 
     st.write(
-        "This checks whether a maintenance fix "
-        "contains keywords associated with high-impact actions."
+        "Check whether a maintenance fix "
+        "contains high-impact keywords."
     )
 
     pr_id = st.selectbox(
@@ -934,7 +1085,7 @@ elif page == "Audit Trail":
     )
 
     st.write(
-        "Every important action is recorded here."
+        "Important system actions are recorded here."
     )
 
     if len(
@@ -958,7 +1109,7 @@ elif page == "Audit Trail":
 
 
 # ============================================================
-# EXPERIMENT / METRICS
+# EXPERIMENT
 # ============================================================
 
 elif page == "Experiment":
@@ -969,8 +1120,7 @@ elif page == "Experiment":
 
     st.write(
         "Measure whether the assistant reduces "
-        "the time required for a new engineer "
-        "to repeat a known fix."
+        "the time required to repeat a known fix."
     )
 
     st.divider()
@@ -1036,8 +1186,7 @@ elif page == "Experiment":
     elif reduction == 0:
 
         st.info(
-            "The assistant produced no time reduction "
-            "in this experiment."
+            "No time reduction was measured."
         )
 
     else:
@@ -1047,7 +1196,7 @@ elif page == "Experiment":
         )
 
     st.subheader(
-        "🎯 Main Metric"
+        "🎯 Main Project Metric"
     )
 
     st.write(
