@@ -1725,6 +1725,13 @@ elif page == "✅ Review Runbooks":
         "✅ Human Review"
     )
 
+    st.write(
+        """
+        Every runbook requires a human decision. High-impact changes
+        require explicit confirmation, and overrides must include a reason.
+        """
+    )
+
     if not st.session_state.runbooks:
 
         st.info(
@@ -1754,6 +1761,10 @@ elif page == "✅ Review Runbooks":
                 f"**{runbook['Verification Status']}**"
             )
 
+            # --------------------------------------------------------
+            # Mandatory evidence checks
+            # --------------------------------------------------------
+
             if (
                 runbook["Changed File"]
                 == "Code diff unavailable."
@@ -1777,35 +1788,131 @@ elif page == "✅ Review Runbooks":
 
                 continue
 
+            # --------------------------------------------------------
+            # Human reviewer identity
+            # --------------------------------------------------------
+
+            reviewer_name = st.text_input(
+                "Human reviewer name",
+                key=f"human_reviewer_{index}",
+                placeholder="Example: Reviewer001"
+            )
+
+            # --------------------------------------------------------
+            # Human decision
+            # --------------------------------------------------------
+
+            decision = st.radio(
+                "Human Decision",
+                [
+                    "Approve",
+                    "Reject",
+                    "Override"
+                ],
+                key=f"decision_{index}",
+                horizontal=True
+            )
+
+            # --------------------------------------------------------
+            # High-impact confirmation
+            # --------------------------------------------------------
+
             confirmation = True
 
             if runbook["High Impact"]:
 
                 st.warning(
-                    "⚠️ High-impact change detected."
+                    "⚠️ HIGH-IMPACT ACTION: "
+                    "Human confirmation is mandatory before approval "
+                    "or override."
                 )
 
                 confirmation = st.checkbox(
-                    "I confirm that this high-impact runbook has been manually reviewed.",
+                    "I confirm that this high-impact runbook has been manually reviewed and I understand the rollback path.",
                     key=f"confirm_{index}"
                 )
 
-            col1, col2 = st.columns(2)
+            # --------------------------------------------------------
+            # Override reason
+            # --------------------------------------------------------
 
-            with col1:
+            override_reason = ""
 
-                if st.button(
-                    "✅ Approve Runbook",
-                    key=f"approve_{index}"
-                ):
+            if decision == "Override":
 
-                    if not confirmation:
+                st.warning(
+                    "⚠️ You are overriding the assistant recommendation. "
+                    "A reason is required and will be stored in the audit trail."
+                )
 
-                        st.error(
-                            "Human confirmation is required."
-                        )
+                override_reason = st.text_area(
+                    "Override reason",
+                    key=f"override_reason_{index}",
+                    placeholder=(
+                        "Example: Reviewer verified the fix manually "
+                        "and approved the change despite the assistant warning."
+                    )
+                )
 
-                    else:
+            # --------------------------------------------------------
+            # Rejection reason
+            # --------------------------------------------------------
+
+            rejection_reason = ""
+
+            if decision == "Reject":
+
+                rejection_reason = st.text_area(
+                    "Rejection reason",
+                    key=f"rejection_reason_{index}",
+                    placeholder=(
+                        "Explain why this runbook should not be approved."
+                    )
+                )
+
+            # --------------------------------------------------------
+            # Submit human decision
+            # --------------------------------------------------------
+
+            if st.button(
+                "💾 Submit Human Decision",
+                key=f"submit_decision_{index}",
+                type="primary"
+            ):
+
+                if not reviewer_name.strip():
+
+                    st.error(
+                        "Please enter the human reviewer name."
+                    )
+
+                elif not confirmation:
+
+                    st.error(
+                        "Human confirmation is required for this high-impact action."
+                    )
+
+                elif decision == "Reject" and not rejection_reason.strip():
+
+                    st.error(
+                        "Please provide a rejection reason."
+                    )
+
+                elif decision == "Override" and not override_reason.strip():
+
+                    st.error(
+                        "Please provide an override reason."
+                    )
+
+                else:
+
+                    reviewer = reviewer_name.strip()
+
+                    # ------------------------------------------------
+                    # APPROVE
+                    # ------------------------------------------------
+
+                    if decision == "Approve":
 
                         if (
                             runbook["PR_ID"]
@@ -1819,40 +1926,80 @@ elif page == "✅ Review Runbooks":
 
                         add_audit(
                             "Runbook Approved",
-                            f"{runbook['PR_ID']} approved by human reviewer"
+                            (
+                                f"{runbook['PR_ID']} approved by "
+                                f"{reviewer}. "
+                                f"High Impact={runbook['High Impact']}. "
+                                f"Human confirmation={confirmation}."
+                            )
                         )
 
                         st.success(
-                            "Runbook approved successfully."
+                            f"✅ Runbook approved by {reviewer}."
                         )
 
-            with col2:
+                    # ------------------------------------------------
+                    # REJECT
+                    # ------------------------------------------------
 
-                reject_reason = st.text_input(
-                    "Rejection reason",
-                    key=f"reason_{index}"
-                )
+                    elif decision == "Reject":
 
-                if st.button(
-                    "❌ Reject Runbook",
-                    key=f"reject_{index}"
-                ):
+                        if (
+                            runbook["PR_ID"]
+                            in
+                            st.session_state.approved_runbooks
+                        ):
 
-                    if not reject_reason.strip():
-
-                        st.error(
-                            "Please provide a rejection reason."
-                        )
-
-                    else:
+                            st.session_state.approved_runbooks.remove(
+                                runbook["PR_ID"]
+                            )
 
                         add_audit(
                             "Runbook Rejected",
-                            f"{runbook['PR_ID']}: {reject_reason}"
+                            (
+                                f"{runbook['PR_ID']} rejected by "
+                                f"{reviewer}. "
+                                f"Reason: {rejection_reason.strip()}"
+                            )
                         )
 
                         st.warning(
-                            "Runbook rejected."
+                            "❌ Runbook rejected and rejection reason recorded."
+                        )
+
+                    # ------------------------------------------------
+                    # OVERRIDE
+                    # ------------------------------------------------
+
+                    elif decision == "Override":
+
+                        if (
+                            runbook["PR_ID"]
+                            not in
+                            st.session_state.approved_runbooks
+                        ):
+
+                            st.session_state.approved_runbooks.append(
+                                runbook["PR_ID"]
+                            )
+
+                        add_audit(
+                            "Runbook Override",
+                            (
+                                f"{runbook['PR_ID']} overridden by "
+                                f"{reviewer}. "
+                                f"Original recommendation: "
+                                f"Confidence={runbook['Confidence']}%, "
+                                f"High Impact={runbook['High Impact']}. "
+                                f"Override reason: "
+                                f"{override_reason.strip()}. "
+                                f"Human confirmation={confirmation}."
+                            )
+                        )
+
+                        st.success(
+                            "⚠️ Recommendation overridden successfully. "
+                            "Override reason recorded in the audit trail."
                         )
 
     if st.session_state.approved_runbooks:
