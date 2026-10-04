@@ -453,7 +453,16 @@ if "approved_runbooks" not in st.session_state:
 # HELPER FUNCTIONS
 # ============================================================
 
-def add_audit(action, details):
+def add_audit(
+    action,
+    details,
+    pr_id="",
+    actor="System",
+    decision="",
+    risk="",
+    reason="",
+    confirmation=""
+):
 
     st.session_state.audit_log.append(
         {
@@ -462,8 +471,26 @@ def add_audit(action, details):
                     "%Y-%m-%d %H:%M:%S"
                 ),
 
+            "Actor":
+                actor,
+
             "Action":
                 action,
+
+            "PR_ID":
+                pr_id,
+
+            "Decision":
+                decision,
+
+            "Risk":
+                risk,
+
+            "Confirmation":
+                confirmation,
+
+            "Reason":
+                reason,
 
             "Details":
                 details
@@ -1931,7 +1958,17 @@ elif page == "✅ Review Runbooks":
                                 f"{reviewer}. "
                                 f"High Impact={runbook['High Impact']}. "
                                 f"Human confirmation={confirmation}."
-                            )
+                            ),
+                            pr_id=runbook["PR_ID"],
+                            actor=reviewer,
+                            decision="Approve",
+                            risk=(
+                                "High Impact"
+                                if runbook["High Impact"]
+                                else "Normal Impact"
+                            ),
+                            reason="Human reviewer approved the runbook.",
+                            confirmation=str(confirmation)
                         )
 
                         st.success(
@@ -1960,7 +1997,17 @@ elif page == "✅ Review Runbooks":
                                 f"{runbook['PR_ID']} rejected by "
                                 f"{reviewer}. "
                                 f"Reason: {rejection_reason.strip()}"
-                            )
+                            ),
+                            pr_id=runbook["PR_ID"],
+                            actor=reviewer,
+                            decision="Reject",
+                            risk=(
+                                "High Impact"
+                                if runbook["High Impact"]
+                                else "Normal Impact"
+                            ),
+                            reason=rejection_reason.strip(),
+                            confirmation=str(confirmation)
                         )
 
                         st.warning(
@@ -1994,7 +2041,17 @@ elif page == "✅ Review Runbooks":
                                 f"Override reason: "
                                 f"{override_reason.strip()}. "
                                 f"Human confirmation={confirmation}."
-                            )
+                            ),
+                            pr_id=runbook["PR_ID"],
+                            actor=reviewer,
+                            decision="Override",
+                            risk=(
+                                "High Impact"
+                                if runbook["High Impact"]
+                                else "Normal Impact"
+                            ),
+                            reason=override_reason.strip(),
+                            confirmation=str(confirmation)
                         )
 
                         st.success(
@@ -2473,7 +2530,15 @@ elif page == "📝 Audit Trail":
 
         st.dataframe(
             audit_df,
-            use_container_width=True
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.download_button(
+            "⬇️ Download Audit Trail CSV",
+            audit_df.to_csv(index=False),
+            file_name="maintenance_audit_trail.csv",
+            mime="text/csv"
         )
 
         st.subheader(
