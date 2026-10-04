@@ -448,24 +448,12 @@ if "experiment_results" not in st.session_state:
 if "approved_runbooks" not in st.session_state:
     st.session_state.approved_runbooks = []
 
-if "change_review_log" not in st.session_state:
-    st.session_state.change_review_log = []
-
 
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
-def add_audit(
-    action,
-    details,
-    pr_id="",
-    actor="System",
-    decision="",
-    risk="",
-    reason="",
-    confirmation=""
-):
+def add_audit(action, details):
 
     st.session_state.audit_log.append(
         {
@@ -474,26 +462,8 @@ def add_audit(
                     "%Y-%m-%d %H:%M:%S"
                 ),
 
-            "Actor":
-                actor,
-
             "Action":
                 action,
-
-            "PR_ID":
-                pr_id,
-
-            "Decision":
-                decision,
-
-            "Risk":
-                risk,
-
-            "Confirmation":
-                confirmation,
-
-            "Reason":
-                reason,
 
             "Details":
                 details
@@ -590,21 +560,16 @@ def generate_runbook(pr_id):
         return None
 
     # --------------------------------------------------------
-    # Explainable Confidence
+    # Confidence
     # --------------------------------------------------------
-    # Each confidence point comes from a visible evidence rule.
-    # PR evidence is required as the base completed-fix source.
-    pr_evidence_score = 40
 
-    incident_evidence_score = (
-        15 if incident is not None else 0
-    )
+    confidence = 40
 
-    diff_evidence_score = (
-        15 if diff is not None else 0
-    )
+    if incident is not None:
+        confidence += 15
 
-    reviewer_evidence_score = 0
+    if diff is not None:
+        confidence += 15
 
     if review is not None:
 
@@ -612,13 +577,10 @@ def generate_runbook(pr_id):
             review["Decision"]
         ).lower() == "approved":
 
-            reviewer_evidence_score = 30
+            confidence += 30
 
     confidence = min(
-        pr_evidence_score
-        + incident_evidence_score
-        + diff_evidence_score
-        + reviewer_evidence_score,
+        confidence,
         100
     )
 
@@ -795,13 +757,6 @@ def generate_runbook(pr_id):
 
         "Confidence":
             confidence,
-
-        "Confidence Rules": {
-            "Pull Request": pr_evidence_score,
-            "Incident Discussion": incident_evidence_score,
-            "Code Diff": diff_evidence_score,
-            "Reviewer Approved": reviewer_evidence_score,
-        },
 
         "High Impact":
             high_impact,
@@ -1607,93 +1562,6 @@ elif page == "📘 Generate Runbook":
             f"{runbook['Confidence']}%**"
         )
 
-        # ============================================================
-        # CONFIDENCE RULES EXPLANATION
-        # ============================================================
-
-        st.divider()
-
-        st.subheader(
-            "📐 Confidence Calculation"
-        )
-
-        st.write(
-            "The confidence score is calculated from four explicit "
-            "evidence rules. The score is capped at 100%."
-        )
-
-        confidence_rules = runbook["Confidence Rules"]
-
-        rule_col1, rule_col2 = st.columns(2)
-
-        with rule_col1:
-
-            if confidence_rules["Pull Request"] > 0:
-                st.success(
-                    f"✓ Pull Request available  +{confidence_rules['Pull Request']}"
-                )
-            else:
-                st.error(
-                    "✗ Pull Request evidence missing  +0"
-                )
-
-            if confidence_rules["Incident Discussion"] > 0:
-                st.success(
-                    f"✓ Incident discussion available  +{confidence_rules['Incident Discussion']}"
-                )
-            else:
-                st.warning(
-                    "⚠ Incident discussion unavailable  +0"
-                )
-
-        with rule_col2:
-
-            if confidence_rules["Code Diff"] > 0:
-                st.success(
-                    f"✓ Code diff available  +{confidence_rules['Code Diff']}"
-                )
-            else:
-                st.warning(
-                    "⚠ Code diff unavailable  +0"
-                )
-
-            if confidence_rules["Reviewer Approved"] > 0:
-                st.success(
-                    f"✓ Reviewer approved  +{confidence_rules['Reviewer Approved']}"
-                )
-            else:
-                st.warning(
-                    "⚠ Reviewer approval not confirmed  +0"
-                )
-
-        st.divider()
-
-        st.write(
-            "### 🧮 Score Calculation"
-        )
-
-        score_parts = [
-            confidence_rules["Pull Request"],
-            confidence_rules["Incident Discussion"],
-            confidence_rules["Code Diff"],
-            confidence_rules["Reviewer Approved"],
-        ]
-
-        st.code(
-            " + ".join(str(x) for x in score_parts)
-            + f" = {runbook['Confidence']}%"
-        )
-
-        st.metric(
-            "Final Confidence",
-            f"{runbook['Confidence']}%"
-        )
-
-        st.caption(
-            "Rule weights: PR = 40, Incident = 15, "
-            "Code Diff = 15, Reviewer Approval = 30."
-        )
-
         st.divider()
 
         st.write(
@@ -1755,13 +1623,6 @@ elif page == "✅ Review Runbooks":
         "✅ Human Review"
     )
 
-    st.write(
-        """
-        Every runbook requires a human decision. High-impact changes
-        require explicit confirmation, and overrides must include a reason.
-        """
-    )
-
     if not st.session_state.runbooks:
 
         st.info(
@@ -1791,10 +1652,6 @@ elif page == "✅ Review Runbooks":
                 f"**{runbook['Verification Status']}**"
             )
 
-            # --------------------------------------------------------
-            # Mandatory evidence checks
-            # --------------------------------------------------------
-
             if (
                 runbook["Changed File"]
                 == "Code diff unavailable."
@@ -1818,131 +1675,35 @@ elif page == "✅ Review Runbooks":
 
                 continue
 
-            # --------------------------------------------------------
-            # Human reviewer identity
-            # --------------------------------------------------------
-
-            reviewer_name = st.text_input(
-                "Human reviewer name",
-                key=f"human_reviewer_{index}",
-                placeholder="Example: Reviewer001"
-            )
-
-            # --------------------------------------------------------
-            # Human decision
-            # --------------------------------------------------------
-
-            decision = st.radio(
-                "Human Decision",
-                [
-                    "Approve",
-                    "Reject",
-                    "Override"
-                ],
-                key=f"decision_{index}",
-                horizontal=True
-            )
-
-            # --------------------------------------------------------
-            # High-impact confirmation
-            # --------------------------------------------------------
-
             confirmation = True
 
             if runbook["High Impact"]:
 
                 st.warning(
-                    "⚠️ HIGH-IMPACT ACTION: "
-                    "Human confirmation is mandatory before approval "
-                    "or override."
+                    "⚠️ High-impact change detected."
                 )
 
                 confirmation = st.checkbox(
-                    "I confirm that this high-impact runbook has been manually reviewed and I understand the rollback path.",
+                    "I confirm that this high-impact runbook has been manually reviewed.",
                     key=f"confirm_{index}"
                 )
 
-            # --------------------------------------------------------
-            # Override reason
-            # --------------------------------------------------------
+            col1, col2 = st.columns(2)
 
-            override_reason = ""
+            with col1:
 
-            if decision == "Override":
+                if st.button(
+                    "✅ Approve Runbook",
+                    key=f"approve_{index}"
+                ):
 
-                st.warning(
-                    "⚠️ You are overriding the assistant recommendation. "
-                    "A reason is required and will be stored in the audit trail."
-                )
+                    if not confirmation:
 
-                override_reason = st.text_area(
-                    "Override reason",
-                    key=f"override_reason_{index}",
-                    placeholder=(
-                        "Example: Reviewer verified the fix manually "
-                        "and approved the change despite the assistant warning."
-                    )
-                )
+                        st.error(
+                            "Human confirmation is required."
+                        )
 
-            # --------------------------------------------------------
-            # Rejection reason
-            # --------------------------------------------------------
-
-            rejection_reason = ""
-
-            if decision == "Reject":
-
-                rejection_reason = st.text_area(
-                    "Rejection reason",
-                    key=f"rejection_reason_{index}",
-                    placeholder=(
-                        "Explain why this runbook should not be approved."
-                    )
-                )
-
-            # --------------------------------------------------------
-            # Submit human decision
-            # --------------------------------------------------------
-
-            if st.button(
-                "💾 Submit Human Decision",
-                key=f"submit_decision_{index}",
-                type="primary"
-            ):
-
-                if not reviewer_name.strip():
-
-                    st.error(
-                        "Please enter the human reviewer name."
-                    )
-
-                elif not confirmation:
-
-                    st.error(
-                        "Human confirmation is required for this high-impact action."
-                    )
-
-                elif decision == "Reject" and not rejection_reason.strip():
-
-                    st.error(
-                        "Please provide a rejection reason."
-                    )
-
-                elif decision == "Override" and not override_reason.strip():
-
-                    st.error(
-                        "Please provide an override reason."
-                    )
-
-                else:
-
-                    reviewer = reviewer_name.strip()
-
-                    # ------------------------------------------------
-                    # APPROVE
-                    # ------------------------------------------------
-
-                    if decision == "Approve":
+                    else:
 
                         if (
                             runbook["PR_ID"]
@@ -1956,110 +1717,40 @@ elif page == "✅ Review Runbooks":
 
                         add_audit(
                             "Runbook Approved",
-                            (
-                                f"{runbook['PR_ID']} approved by "
-                                f"{reviewer}. "
-                                f"High Impact={runbook['High Impact']}. "
-                                f"Human confirmation={confirmation}."
-                            ),
-                            pr_id=runbook["PR_ID"],
-                            actor=reviewer,
-                            decision="Approve",
-                            risk=(
-                                "High Impact"
-                                if runbook["High Impact"]
-                                else "Normal Impact"
-                            ),
-                            reason="Human reviewer approved the runbook.",
-                            confirmation=str(confirmation)
+                            f"{runbook['PR_ID']} approved by human reviewer"
                         )
 
                         st.success(
-                            f"✅ Runbook approved by {reviewer}."
+                            "Runbook approved successfully."
                         )
 
-                    # ------------------------------------------------
-                    # REJECT
-                    # ------------------------------------------------
+            with col2:
 
-                    elif decision == "Reject":
+                reject_reason = st.text_input(
+                    "Rejection reason",
+                    key=f"reason_{index}"
+                )
 
-                        if (
-                            runbook["PR_ID"]
-                            in
-                            st.session_state.approved_runbooks
-                        ):
+                if st.button(
+                    "❌ Reject Runbook",
+                    key=f"reject_{index}"
+                ):
 
-                            st.session_state.approved_runbooks.remove(
-                                runbook["PR_ID"]
-                            )
+                    if not reject_reason.strip():
+
+                        st.error(
+                            "Please provide a rejection reason."
+                        )
+
+                    else:
 
                         add_audit(
                             "Runbook Rejected",
-                            (
-                                f"{runbook['PR_ID']} rejected by "
-                                f"{reviewer}. "
-                                f"Reason: {rejection_reason.strip()}"
-                            ),
-                            pr_id=runbook["PR_ID"],
-                            actor=reviewer,
-                            decision="Reject",
-                            risk=(
-                                "High Impact"
-                                if runbook["High Impact"]
-                                else "Normal Impact"
-                            ),
-                            reason=rejection_reason.strip(),
-                            confirmation=str(confirmation)
+                            f"{runbook['PR_ID']}: {reject_reason}"
                         )
 
                         st.warning(
-                            "❌ Runbook rejected and rejection reason recorded."
-                        )
-
-                    # ------------------------------------------------
-                    # OVERRIDE
-                    # ------------------------------------------------
-
-                    elif decision == "Override":
-
-                        if (
-                            runbook["PR_ID"]
-                            not in
-                            st.session_state.approved_runbooks
-                        ):
-
-                            st.session_state.approved_runbooks.append(
-                                runbook["PR_ID"]
-                            )
-
-                        add_audit(
-                            "Runbook Override",
-                            (
-                                f"{runbook['PR_ID']} overridden by "
-                                f"{reviewer}. "
-                                f"Original recommendation: "
-                                f"Confidence={runbook['Confidence']}%, "
-                                f"High Impact={runbook['High Impact']}. "
-                                f"Override reason: "
-                                f"{override_reason.strip()}. "
-                                f"Human confirmation={confirmation}."
-                            ),
-                            pr_id=runbook["PR_ID"],
-                            actor=reviewer,
-                            decision="Override",
-                            risk=(
-                                "High Impact"
-                                if runbook["High Impact"]
-                                else "Normal Impact"
-                            ),
-                            reason=override_reason.strip(),
-                            confirmation=str(confirmation)
-                        )
-
-                        st.success(
-                            "⚠️ Recommendation overridden successfully. "
-                            "Override reason recorded in the audit trail."
+                            "Runbook rejected."
                         )
 
     if st.session_state.approved_runbooks:
@@ -2147,7 +1838,7 @@ elif page == "🔌 API Integration":
 elif page == "🔄 Rollback Manager":
 
     st.title(
-        "🔄 Change Review & Rollback Manager"
+        "🔄 Rollback Manager"
     )
 
     st.warning(
@@ -2155,8 +1846,7 @@ elif page == "🔄 Rollback Manager":
         Prototype simulation only.
 
         This feature does NOT modify production code.
-        It records the change-review decision and the rollback path.
-        High-impact changes require explicit human confirmation.
+        It records the rollback path and reason.
         """
     )
 
@@ -2166,202 +1856,13 @@ elif page == "🔄 Rollback Manager":
     )
 
     pr = get_pr(pr_id)
+
     diff = get_diff(pr_id)
 
     if pr is not None:
 
         st.subheader(
             f"{pr_id} - {pr['Title']}"
-        )
-
-        combined_text = (
-            str(pr["Title"])
-            + " "
-            + str(pr["Description"])
-            + " "
-            + str(pr["Resolution"])
-        )
-
-        high_impact = is_high_impact(
-            combined_text
-        )
-
-        # --------------------------------------------------------
-        # CHANGE REVIEW
-        # --------------------------------------------------------
-
-        st.divider()
-
-        st.subheader(
-            "🔍 Change Review"
-        )
-
-        if high_impact:
-
-            st.error(
-                "🚨 HIGH-IMPACT CHANGE"
-            )
-
-            st.write(
-                "Human review and explicit confirmation are required "
-                "before this change can be accepted as a trusted maintenance change."
-            )
-
-        else:
-
-            st.success(
-                "✅ NORMAL-IMPACT CHANGE"
-            )
-
-            st.write(
-                "Standard human change review is required."
-            )
-
-        review_actor = st.text_input(
-            "Reviewer / Change Owner",
-            placeholder="Example: Reviewer001"
-        )
-
-        review_decision = st.radio(
-            "Change Review Decision",
-            [
-                "Approve Change",
-                "Reject Change"
-            ],
-            horizontal=True
-        )
-
-        if high_impact:
-
-            change_confirmation = st.checkbox(
-                "I confirm that I reviewed the high-impact change, "
-                "understand the risk, and have checked the rollback path."
-            )
-
-        else:
-
-            change_confirmation = True
-
-        change_reason = st.text_area(
-            "Change Review Reason",
-            placeholder=(
-                "Explain why this change is approved or rejected..."
-            )
-        )
-
-        if st.button(
-            "📋 Record Change Review",
-            type="primary"
-        ):
-
-            if not review_actor.strip():
-
-                st.error(
-                    "Reviewer / Change Owner is required."
-                )
-
-            elif high_impact and not change_confirmation:
-
-                st.error(
-                    "Explicit human confirmation is required for high-impact changes."
-                )
-
-            elif not change_reason.strip():
-
-                st.error(
-                    "Change review reason is required."
-                )
-
-            else:
-
-                review_record = {
-
-                    "PR_ID":
-                        pr_id,
-
-                    "Reviewer":
-                        review_actor,
-
-                    "Decision":
-                        review_decision,
-
-                    "Risk":
-                        "High Impact" if high_impact else "Normal Impact",
-
-                    "Confirmation":
-                        bool(change_confirmation),
-
-                    "Reason":
-                        change_reason,
-
-                    "Timestamp":
-                        datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-                }
-
-                st.session_state.change_review_log.append(
-                    review_record
-                )
-
-                add_audit(
-                    "Change Review Recorded",
-                    f"{pr_id}: {review_decision}",
-                    pr_id=pr_id,
-                    actor=review_actor,
-                    decision=review_decision,
-                    risk=(
-                        "High Impact"
-                        if high_impact
-                        else "Normal Impact"
-                    ),
-                    reason=change_reason,
-                    confirmation=str(change_confirmation)
-                )
-
-                if review_decision == "Approve Change":
-
-                    st.success(
-                        "✅ Change review approved and recorded."
-                    )
-
-                else:
-
-                    st.warning(
-                        "⚠️ Change review rejected and recorded."
-                    )
-
-        # --------------------------------------------------------
-        # CHANGE REVIEW HISTORY
-        # --------------------------------------------------------
-
-        if st.session_state.change_review_log:
-
-            st.write(
-                "### 📋 Change Review History"
-            )
-
-            st.dataframe(
-                pd.DataFrame(
-                    st.session_state.change_review_log
-                ),
-                use_container_width=True
-            )
-
-        # --------------------------------------------------------
-        # ROLLBACK PATH
-        # --------------------------------------------------------
-
-        st.divider()
-
-        st.subheader(
-            "🔄 Rollback Path"
-        )
-
-        st.write(
-            "The rollback path records what would be restored, "
-            "why rollback is required, and who confirmed it. "
-            "No production code is changed by this prototype."
         )
 
         if diff is not None:
@@ -2388,43 +1889,46 @@ elif page == "🔄 Rollback Manager":
                     str(diff["New_Code"])
                 )
 
+        combined_text = (
+            str(pr["Title"])
+            + " "
+            + str(pr["Description"])
+            + " "
+            + str(pr["Resolution"])
+        )
+
+        high_impact = is_high_impact(
+            combined_text
+        )
+
         if high_impact:
 
+            st.error(
+                "🚨 High-impact change. Human confirmation required."
+            )
+
             rollback_confirmation = st.checkbox(
-                "I confirm that rollback is required and I have reviewed the rollback path."
+                "I confirm that rollback is required."
             )
 
         else:
 
             rollback_confirmation = True
 
-        rollback_actor = st.text_input(
-            "Rollback Reviewer",
-            placeholder="Example: Reviewer001",
-            key=f"rollback_actor_{pr_id}"
-        )
-
         reason = st.text_area(
             "Rollback Reason",
-            placeholder="Explain why the rollback is required...",
-            key=f"rollback_reason_{pr_id}"
+            placeholder="Explain why the rollback is required..."
         )
 
         if st.button(
             "🔄 Record Rollback",
-            type="secondary"
+            type="primary"
         ):
 
-            if not rollback_actor.strip():
+            if not rollback_confirmation:
 
                 st.error(
-                    "Rollback reviewer is required."
-                )
-
-            elif not rollback_confirmation:
-
-                st.error(
-                    "Human confirmation is required for this rollback."
+                    "Human confirmation is required."
                 )
 
             elif not reason.strip():
@@ -2440,17 +1944,8 @@ elif page == "🔄 Rollback Manager":
                     "PR_ID":
                         pr_id,
 
-                    "Reviewer":
-                        rollback_actor,
-
                     "Reason":
                         reason,
-
-                    "Risk":
-                        "High Impact" if high_impact else "Normal Impact",
-
-                    "Confirmation":
-                        bool(rollback_confirmation),
 
                     "Timestamp":
                         datetime.now().strftime(
@@ -2467,21 +1962,11 @@ elif page == "🔄 Rollback Manager":
 
                 add_audit(
                     "Rollback Recorded",
-                    f"{pr_id}: {reason}",
-                    pr_id=pr_id,
-                    actor=rollback_actor,
-                    decision="Rollback",
-                    risk=(
-                        "High Impact"
-                        if high_impact
-                        else "Normal Impact"
-                    ),
-                    reason=reason,
-                    confirmation=str(rollback_confirmation)
+                    f"{pr_id}: {reason}"
                 )
 
                 st.success(
-                    "✅ Rollback path recorded successfully."
+                    "Rollback path recorded successfully."
                 )
 
     if st.session_state.rollback_log:
@@ -2501,7 +1986,6 @@ elif page == "🔄 Rollback Manager":
 
 
 # ============================================================
-
 # RISK CHECKER
 # ============================================================
 
@@ -2740,15 +2224,7 @@ elif page == "📝 Audit Trail":
 
         st.dataframe(
             audit_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.download_button(
-            "⬇️ Download Audit Trail CSV",
-            audit_df.to_csv(index=False),
-            file_name="maintenance_audit_trail.csv",
-            mime="text/csv"
+            use_container_width=True
         )
 
         st.subheader(
@@ -2799,11 +2275,357 @@ elif page == "📊 Validation Dashboard":
         """
         Measure whether the assistant reduces the time required
         for a new engineer to repeat a known maintenance fix.
+        The validation data is synthetic/anonymised.
         """
     )
 
+    # --------------------------------------------------------
+    # LOAD SYNTHETIC VALIDATION DATASET
+    # --------------------------------------------------------
+
+    validation_file = DATA_DIR / "validation_dataset.csv"
+
+    if validation_file.exists():
+
+        try:
+
+            validation_df = pd.read_csv(
+                validation_file
+            )
+
+            st.success(
+                f"✅ Synthetic validation dataset loaded: "
+                f"{len(validation_df)} cases"
+            )
+
+        except Exception as e:
+
+            validation_df = pd.DataFrame()
+
+            st.error(
+                "Unable to read validation_dataset.csv."
+            )
+
+            st.code(str(e))
+
+    else:
+
+        validation_df = pd.DataFrame()
+
+        st.warning(
+            "⚠️ validation_dataset.csv was not found in data/."
+        )
+
+    # --------------------------------------------------------
+    # DATASET SUMMARY
+    # --------------------------------------------------------
+
+    if not validation_df.empty:
+
+        st.subheader(
+            "🧪 Validation Dataset"
+        )
+
+        st.dataframe(
+            validation_df,
+            use_container_width=True
+        )
+
+        st.subheader(
+            "📦 Dataset Coverage"
+        )
+
+        required_columns = [
+            "pr_id",
+            "incident_id",
+            "code_diff_available",
+            "reviewer_status",
+            "expected_runbook",
+            "baseline_minutes",
+            "assistant_minutes"
+        ]
+
+        missing_columns = [
+            column
+            for column in required_columns
+            if column not in validation_df.columns
+        ]
+
+        if missing_columns:
+
+            st.error(
+                "❌ Required validation columns are missing: "
+                + ", ".join(missing_columns)
+            )
+
+        else:
+
+            valid_cases = validation_df[
+                validation_df["reviewer_status"].str.lower()
+                == "approved"
+            ]
+
+            normal_cases = validation_df[
+                validation_df["impact_level"].str.lower()
+                == "normal"
+            ] if "impact_level" in validation_df.columns else pd.DataFrame()
+
+            edge_cases = validation_df[
+                (
+                    validation_df["code_diff_available"].str.lower()
+                    == "no"
+                )
+                |
+                (
+                    validation_df["incident_id"].str.lower()
+                    == "missing"
+                )
+                |
+                (
+                    validation_df["reviewer_status"].str.lower()
+                    != "approved"
+                )
+            ]
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+
+                st.metric(
+                    "Total Cases",
+                    len(validation_df)
+                )
+
+            with col2:
+
+                st.metric(
+                    "Approved Cases",
+                    len(valid_cases)
+                )
+
+            with col3:
+
+                st.metric(
+                    "Normal Cases",
+                    len(normal_cases)
+                )
+
+            with col4:
+
+                st.metric(
+                    "Edge/Failure Cases",
+                    len(edge_cases)
+                )
+
+    # --------------------------------------------------------
+    # BASELINE EXPERIMENT FROM SYNTHETIC DATA
+    # --------------------------------------------------------
+
+    if not validation_df.empty and {
+        "baseline_minutes",
+        "assistant_minutes"
+    }.issubset(validation_df.columns):
+
+        st.divider()
+
+        st.subheader(
+            "⏱️ Baseline vs Assistant Experiment"
+        )
+
+        experiment_df = validation_df.copy()
+
+        experiment_df["baseline_minutes"] = pd.to_numeric(
+            experiment_df["baseline_minutes"],
+            errors="coerce"
+        )
+
+        experiment_df["assistant_minutes"] = pd.to_numeric(
+            experiment_df["assistant_minutes"],
+            errors="coerce"
+        )
+
+        experiment_df = experiment_df.dropna(
+            subset=[
+                "baseline_minutes",
+                "assistant_minutes"
+            ]
+        )
+
+        # Only reviewer-approved cases are used for the
+        # main repeat-fix effectiveness experiment.
+        approved_experiment = experiment_df[
+            experiment_df["reviewer_status"].str.lower()
+            == "approved"
+        ].copy()
+
+        if not approved_experiment.empty:
+
+            approved_experiment["time_saved"] = (
+                approved_experiment["baseline_minutes"]
+                - approved_experiment["assistant_minutes"]
+            )
+
+            approved_experiment["reduction_percent"] = (
+                approved_experiment["time_saved"]
+                / approved_experiment["baseline_minutes"]
+            ) * 100
+
+            avg_baseline = approved_experiment[
+                "baseline_minutes"
+            ].mean()
+
+            avg_assistant = approved_experiment[
+                "assistant_minutes"
+            ].mean()
+
+            avg_saved = approved_experiment[
+                "time_saved"
+            ].mean()
+
+            avg_reduction = approved_experiment[
+                "reduction_percent"
+            ].mean()
+
+            target = 30.0
+
+            col1, col2, col3, col4 = st.columns(4)
+
+            with col1:
+
+                st.metric(
+                    "Baseline Average",
+                    f"{avg_baseline:.1f} min"
+                )
+
+            with col2:
+
+                st.metric(
+                    "Assistant Average",
+                    f"{avg_assistant:.1f} min"
+                )
+
+            with col3:
+
+                st.metric(
+                    "Average Time Saved",
+                    f"{avg_saved:.1f} min"
+                )
+
+            with col4:
+
+                st.metric(
+                    "Measured Reduction",
+                    f"{avg_reduction:.1f}%"
+                )
+
+            st.subheader(
+                "🎯 Target"
+            )
+
+            st.write(
+                f"**Target:** {target:.0f}% reduction in repeat-fix time"
+            )
+
+            if avg_reduction >= target:
+
+                st.success(
+                    f"✅ Target achieved — measured reduction is "
+                    f"{avg_reduction:.1f}%."
+                )
+
+            else:
+
+                st.warning(
+                    f"⚠️ Target not achieved — measured reduction is "
+                    f"{avg_reduction:.1f}%."
+                )
+
+            st.subheader(
+                "📋 Measured Experiment Results"
+            )
+
+            display_columns = [
+                "case_id",
+                "pr_id",
+                "baseline_minutes",
+                "assistant_minutes",
+                "time_saved",
+                "reduction_percent",
+                "result" if "result" in approved_experiment.columns else None
+            ]
+
+            display_columns = [
+                column
+                for column in display_columns
+                if column is not None and column in approved_experiment.columns
+            ]
+
+            st.dataframe(
+                approved_experiment[display_columns],
+                use_container_width=True
+            )
+
+            # ------------------------------------------------
+            # ERROR ANALYSIS
+            # ------------------------------------------------
+
+            st.subheader(
+                "🔍 Error Analysis"
+            )
+
+            error_rows = approved_experiment[
+                approved_experiment["reduction_percent"] < target
+            ]
+
+            if error_rows.empty:
+
+                st.success(
+                    "No approved experiment case fell below the "
+                    f"{target:.0f}% reduction target."
+                )
+
+            else:
+
+                st.warning(
+                    f"{len(error_rows)} approved case(s) "
+                    "fell below the target and require analysis."
+                )
+
+                error_columns = [
+                    "case_id",
+                    "pr_id",
+                    "baseline_minutes",
+                    "assistant_minutes",
+                    "reduction_percent",
+                    "observation"
+                ]
+
+                error_columns = [
+                    column
+                    for column in error_columns
+                    if column in error_rows.columns
+                ]
+
+                st.dataframe(
+                    error_rows[error_columns],
+                    use_container_width=True
+                )
+
+        else:
+
+            st.warning(
+                "No reviewer-approved cases are available for the "
+                "main repeat-fix experiment."
+            )
+
+    # --------------------------------------------------------
+    # MANUAL EXPERIMENT ENTRY
+    # --------------------------------------------------------
+
+    st.divider()
+
     st.subheader(
-        "➕ Add Experiment Result"
+        "➕ Add Measured Experiment Result"
     )
 
     col1, col2 = st.columns(2)
@@ -2812,13 +2634,13 @@ elif page == "📊 Validation Dashboard":
 
         test_case = st.text_input(
             "Test Case",
-            placeholder="Example: Redis timeout fix"
+            placeholder="Example: CSV parser fix with a new engineer"
         )
 
         baseline_time = st.number_input(
             "Baseline Time (minutes)",
             min_value=1.0,
-            value=60.0
+            value=20.0
         )
 
     with col2:
@@ -2826,7 +2648,7 @@ elif page == "📊 Validation Dashboard":
         assistant_time = st.number_input(
             "With Assistant (minutes)",
             min_value=1.0,
-            value=30.0
+            value=10.0
         )
 
         result = st.selectbox(
@@ -2909,9 +2731,9 @@ elif page == "📊 Validation Dashboard":
                 "Validation result added successfully."
             )
 
-    # ========================================================
-    # DISPLAY VALIDATION RESULTS
-    # ========================================================
+    # --------------------------------------------------------
+    # MANUAL RESULTS
+    # --------------------------------------------------------
 
     if st.session_state.experiment_results:
 
@@ -2922,7 +2744,7 @@ elif page == "📊 Validation Dashboard":
         st.divider()
 
         st.subheader(
-            "📈 Experiment Metrics"
+            "📈 Manual Experiment Metrics"
         )
 
         avg_baseline = results_df[
@@ -2949,146 +2771,27 @@ elif page == "📊 Validation Dashboard":
         col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-
-            st.metric(
-                "Avg Baseline",
-                f"{avg_baseline:.1f} min"
-            )
+            st.metric("Avg Baseline", f"{avg_baseline:.1f} min")
 
         with col2:
-
-            st.metric(
-                "Avg Assistant",
-                f"{avg_assistant:.1f} min"
-            )
+            st.metric("Avg Assistant", f"{avg_assistant:.1f} min")
 
         with col3:
-
-            st.metric(
-                "Avg Time Saved",
-                f"{avg_saved:.1f} min"
-            )
+            st.metric("Avg Time Saved", f"{avg_saved:.1f} min")
 
         with col4:
-
-            st.metric(
-                "Avg Reduction",
-                f"{avg_reduction:.1f}%"
-            )
+            st.metric("Avg Reduction", f"{avg_reduction:.1f}%")
 
         with col5:
-
-            st.metric(
-                "Success Rate",
-                f"{success_rate:.1f}%"
-            )
-
-        # ----------------------------------------------------
-        # TARGET
-        # ----------------------------------------------------
-
-        target = 30
-
-        st.subheader(
-            "🎯 Target"
-        )
-
-        if avg_reduction >= target:
-
-            st.success(
-                f"""
-                Target achieved!
-
-                Target: {target}% reduction
-
-                Measured: {avg_reduction:.1f}% reduction
-                """
-            )
-
-        else:
-
-            st.warning(
-                f"""
-                Target not yet achieved.
-
-                Target: {target}% reduction
-
-                Measured: {avg_reduction:.1f}% reduction
-                """
-            )
-
-        # ----------------------------------------------------
-        # RESULTS TABLE
-        # ----------------------------------------------------
-
-        st.subheader(
-            "📋 Experiment Results"
-        )
+            st.metric("Success Rate", f"{success_rate:.1f}%")
 
         st.dataframe(
             results_df,
             use_container_width=True
         )
 
-        # ----------------------------------------------------
-        # SIMPLE VISUAL COMPARISON
-        # ----------------------------------------------------
-
         st.subheader(
-            "⏱️ Time Comparison"
-        )
-
-        for _, row in results_df.iterrows():
-
-            st.write(
-                f"**{row['Test Case']}**"
-            )
-
-            baseline = float(
-                row["Baseline Minutes"]
-            )
-
-            assistant = float(
-                row["Assistant Minutes"]
-            )
-
-            percentage = int(
-                min(
-                    (assistant / baseline) * 100,
-                    100
-                )
-            )
-
-            st.write(
-                f"Baseline: {baseline:.1f} minutes"
-            )
-
-            st.progress(
-                100
-            )
-
-            st.write(
-                f"Assistant: {assistant:.1f} minutes"
-            )
-
-            st.progress(
-                percentage
-            )
-
-            st.write(
-                f"Time saved: "
-                f"{row['Time Saved']:.1f} minutes "
-                f"({row['Reduction %']:.1f}%)"
-            )
-
-            st.divider()
-
-        # ----------------------------------------------------
-        # ERROR ANALYSIS
-        # ----------------------------------------------------
-
-        st.subheader(
-            "🔍 Error Analysis"
+            "🔍 Manual Error Analysis"
         )
 
         failures = results_df[
@@ -3098,13 +2801,13 @@ elif page == "📊 Validation Dashboard":
         if failures.empty:
 
             st.success(
-                "No failed or partial validation cases recorded."
+                "No failed or partial manual validation cases recorded."
             )
 
         else:
 
             st.warning(
-                f"{len(failures)} validation case(s) "
+                f"{len(failures)} manual validation case(s) "
                 "need further analysis."
             )
 
@@ -3118,12 +2821,6 @@ elif page == "📊 Validation Dashboard":
                 ],
                 use_container_width=True
             )
-
-    else:
-
-        st.info(
-            "Add experiment results to display validation metrics."
-        )
 
 
 # ============================================================
