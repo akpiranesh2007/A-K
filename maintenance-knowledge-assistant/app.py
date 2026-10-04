@@ -2,6 +2,10 @@ import streamlit as st
 import pandas as pd
 from pathlib import Path
 from datetime import datetime
+import sqlite3
+import json
+import re
+import statistics
 
 
 # ============================================================
@@ -370,6 +374,7 @@ AUDIT_FILE = DATA_DIR / "audit_log.csv"
 TRUST_FILE = DATA_DIR / "trusted_runbooks.csv"
 ROLLBACK_FILE = DATA_DIR / "rollback_log.csv"
 EXPERIMENT_FILE = DATA_DIR / "experiment_results.csv"
+SQLITE_FILE = DATA_DIR / "maintenance_assistant.db"
 
 
 # ============================================================
@@ -480,24 +485,182 @@ if "persistence_warning" not in st.session_state:
 # PERSISTENCE + TRUST HELPERS
 # ============================================================
 
+def _db_connect():
+    """Open the durable SQLite store used by the prototype."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    conn = sqlite3.connect(SQLITE_FILE, check_same_thread=False)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS records (
+            record_type TEXT NOT NULL,
+            record_key TEXT NOT NULL,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            PRIMARY KEY (record_type, record_key)
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS runbooks (
+            pr_id TEXT PRIMARY KEY,
+            title TEXT,
+            trust_status TEXT,
+            risk TEXT,
+            confidence REAL,
+            payload TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS validation_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            test_case TEXT,
+            baseline_minutes REAL,
+            assistant_minutes REAL,
+            time_saved REAL,
+            reduction_percent REAL,
+            result TEXT,
+            observation TEXT,
+            created_at TEXT NOT NULL
+        )
+    """)
+    conn.commit()
+    return conn
+
+
+def _db_record_type(path):
+    name = Path(path).name
+    return {
+        "audit_log.csv": "audit",
+        "trusted_runbooks.csv": "trusted",
+        "rollback_log.csv": "rollback",
+        "experiment_results.csv": "validation"
+    }.get(name, "general")
+
+
+def _db_read(path):
+    """Read persistent records from SQLite."""
+    record_type = _db_record_type(path)
+    try:
+        conn = _db_connect()
+        rows = conn.execute(
+            "SELECT record_key, payload FROM records WHERE record_type=? ORDER BY record_key",
+            (record_type,)
+        ).fetchall()
+        conn.close()
+        return [json.loads(payload) for _, payload in rows]
+    except Exception as e:
+        st.session_state.persistence_warning = str(e)
+        return []
+
+
+def _db_write(path, records):
+    """Replace a record collection in SQLite and keep a CSV export for transparency."""
+    record_type = _db_record_type(path)
+    try:
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn = _db_connect()
+        conn.execute("DELETE FROM records WHERE record_type=?", (record_type,))
+        for i, row in enumerate(records):
+            key = str(row.get("PR_ID", row.get("Test Case", i))) + "::" + str(i)
+            conn.execute(
+                "INSERT OR REPLACE INTO records(record_type,record_key,payload,updated_at) VALUES(?,?,?,?)",
+                (record_type, key, json.dumps(row, default=str), now)
+            )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.session_state.persistence_warning = str(e)
+        return False
+
+
+def _db_save_runbook(runbook):
+    try:
+        conn = _db_connect()
+        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        conn.execute(
+            """INSERT OR REPLACE INTO runbooks
+            (pr_id,title,trust_status,risk,confidence,payload,updated_at)
+            VALUES(?,?,?,?,?,?,?)""",
+            (
+                str(runbook.get("PR_ID", "")),
+                str(runbook.get("Title", "")),
+                str(runbook.get("Trust Status", "")),
+                "High Impact" if runbook.get("High Impact", False) else "Normal Impact",
+                float(runbook.get("Confidence", 0)),
+                json.dumps(runbook, default=str),
+                now
+            )
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.session_state.persistence_warning = str(e)
+        return False
+
+
+def _db_load_runbooks():
+    try:
+        conn = _db_connect()
+        rows = conn.execute("SELECT payload FROM runbooks ORDER BY updated_at").fetchall()
+        conn.close()
+        return [json.loads(row[0]) for row in rows]
+    except Exception as e:
+        st.session_state.persistence_warning = str(e)
+        return []
+
+
+def _db_save_validation(experiment):
+    try:
+        conn = _db_connect()
+        conn.execute(
+            """INSERT INTO validation_results
+            (test_case,baseline_minutes,assistant_minutes,time_saved,reduction_percent,result,observation,created_at)
+            VALUES(?,?,?,?,?,?,?,?)""",
+            (
+                experiment.get("Test Case", ""),
+                float(experiment.get("Baseline Minutes", 0)),
+                float(experiment.get("Assistant Minutes", 0)),
+                float(experiment.get("Time Saved", 0)),
+                float(experiment.get("Reduction %", 0)),
+                experiment.get("Result", ""),
+                experiment.get("Observation", ""),
+                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            )
+        )
+        conn.commit()
+        conn.close()
+        return True
+    except Exception as e:
+        st.session_state.persistence_warning = str(e)
+        return False
+
+
 def _read_records(path):
-    """Read a small prototype CSV safely. Missing/corrupt files are ignored."""
+    """Read durable SQLite records first, with CSV fallback for migration."""
+    db_records = _db_read(path)
+    if db_records:
+        return db_records
     try:
         if not path.exists():
             return []
         df = pd.read_csv(path).fillna("")
-        return df.to_dict("records")
+        records = df.to_dict("records")
+        if records:
+            _db_write(path, records)
+        return records
     except Exception as e:
         st.session_state.persistence_warning = str(e)
         return []
 
 
 def _write_records(path, records):
-    """Persist prototype records without allowing a filesystem issue to crash the app."""
+    """Persist records durably in SQLite and also export CSV for inspection."""
     try:
         DATA_DIR.mkdir(parents=True, exist_ok=True)
+        db_ok = _db_write(path, records)
         pd.DataFrame(records).to_csv(path, index=False)
-        return True
+        return db_ok
     except Exception as e:
         st.session_state.persistence_warning = str(e)
         return False
@@ -506,6 +669,11 @@ def _write_records(path, records):
 def _load_persistent_state():
     if st.session_state.persistence_loaded:
         return
+
+    # Runbooks are indexed durably in SQLite.
+    persisted_runbooks = _db_load_runbooks()
+    if persisted_runbooks:
+        st.session_state.runbooks = persisted_runbooks
 
     # Audit
     audit_records = _read_records(AUDIT_FILE)
@@ -640,6 +808,7 @@ def approve_runbook(runbook, reviewer_name, approval_reason, high_impact_confirm
         "High_Impact": str(runbook.get("High Impact", False))
     }
     _persist_trusted_state()
+    _db_save_runbook(runbook)
 
     add_audit(
         "Runbook Approved" if decision == "Approve" else "Runbook Override",
@@ -673,6 +842,7 @@ def reject_runbook(runbook, reviewer_name, rejection_reason):
         if str(x) != pr_id
     ]
     _persist_trusted_state()
+    _db_save_runbook(runbook)
 
     runbook["Trust Status"] = "REJECTED"
     runbook["Human Review Status"] = "Rejected"
@@ -706,6 +876,7 @@ def revoke_trust(runbook, reviewer_name, reason):
     st.session_state.approved_runbooks = [x for x in st.session_state.approved_runbooks if str(x) != pr_id]
     st.session_state.human_confirmations = [x for x in st.session_state.human_confirmations if str(x) != pr_id]
     _persist_trusted_state()
+    _db_save_runbook(runbook)
 
     runbook["Trust Status"] = "REVOKED"
     runbook["Human Review Status"] = "Trust Revoked"
@@ -857,6 +1028,63 @@ _load_persistent_state()
 # RUNBOOK GENERATOR
 # ============================================================
 
+# ============================================================
+# STRUCTURED EXTRACTION / LIGHTWEIGHT NLP
+# ============================================================
+
+def _sentences(text):
+    text = re.sub(r"\s+", " ", str(text or "")).strip()
+    if not text:
+        return []
+    return [x.strip(" .") for x in re.split(r"(?<=[.!?])\s+|[;|]", text) if x.strip()]
+
+
+def extract_root_cause(problem, discussion, resolution):
+    """Extract root-cause evidence using transparent phrase/sentence rules."""
+    source = f"{problem}. {discussion}. {resolution}"
+    cause_terms = ("because", "caused by", "root cause", "due to", "incorrect", "missing", "expired", "timeout", "misconfigured", "configuration", "permission")
+    candidates = [s for s in _sentences(source) if any(t in s.lower() for t in cause_terms)]
+    if candidates:
+        return candidates[0]
+    discussion_sentences = _sentences(discussion)
+    if discussion_sentences:
+        return discussion_sentences[0]
+    return "Root cause could not be confidently extracted from the available evidence."
+
+
+def extract_action_steps(resolution, new_code):
+    """Turn resolution/change evidence into short reusable action steps."""
+    source = f"{resolution}. {new_code}"
+    sentences = _sentences(source)
+    steps = []
+    action_words = ("update", "change", "replace", "add", "remove", "set", "configure", "restart", "deploy", "enable", "disable", "modify", "fix")
+    for sentence in sentences:
+        if any(word in sentence.lower() for word in action_words):
+            steps.append(sentence)
+    if not steps and resolution:
+        steps.append(str(resolution).strip())
+    return steps[:5]
+
+
+def extract_verification_steps(resolution, discussion):
+    source = f"{resolution}. {discussion}"
+    verification_words = ("verify", "test", "confirm", "validated", "working", "resolved", "monitor", "check")
+    found = [s for s in _sentences(source) if any(w in s.lower() for w in verification_words)]
+    return found[:5]
+
+
+def build_structured_evidence(problem, discussion, resolution, new_code):
+    root = extract_root_cause(problem, discussion, resolution)
+    actions = extract_action_steps(resolution, new_code)
+    verification_steps = extract_verification_steps(resolution, discussion)
+    return {
+        "Root Cause Signal": root,
+        "Action Steps": actions,
+        "Verification Steps": verification_steps,
+        "Extraction Method": "Transparent phrase/sentence rules",
+    }
+
+
 def generate_runbook(pr_id):
 
     pr = get_pr(pr_id)
@@ -989,6 +1217,16 @@ def generate_runbook(pr_id):
         )
 
     # --------------------------------------------------------
+    # Structured extraction / lightweight NLP
+    # --------------------------------------------------------
+    structured_evidence = build_structured_evidence(
+        problem,
+        root_cause if incident is not None else "",
+        str(pr["Resolution"]),
+        new_code if diff is not None else ""
+    )
+
+    # --------------------------------------------------------
     # Verification
     # --------------------------------------------------------
 
@@ -1042,7 +1280,16 @@ def generate_runbook(pr_id):
             problem,
 
         "Root Cause":
-            root_cause,
+            structured_evidence["Root Cause Signal"],
+
+        "Structured Evidence":
+            structured_evidence,
+
+        "Action Steps":
+            structured_evidence["Action Steps"],
+
+        "Verification Steps":
+            structured_evidence["Verification Steps"],
 
         "Solution":
             str(pr["Resolution"]),
@@ -1315,6 +1562,8 @@ Validation
         """
     )
 
+    st.success(f"🗄️ Persistent storage active: SQLite database at `{SQLITE_FILE.name}`")
+
     st.markdown(
         """
         <div class="info-box">
@@ -1523,6 +1772,7 @@ elif page == "📘 Generate Runbook":
 
             if existing is None:
                 st.session_state.runbooks.append(runbook)
+                _db_save_runbook(runbook)
                 add_audit(
                     "Runbook Generated",
                     f"Runbook generated for {pr_id}",
@@ -1531,6 +1781,7 @@ elif page == "📘 Generate Runbook":
             else:
                 existing.clear()
                 existing.update(runbook)
+                _db_save_runbook(existing)
                 add_audit(
                     "Runbook Regenerated",
                     f"Runbook regenerated for {pr_id}",
@@ -1584,6 +1835,14 @@ elif page == "📘 Generate Runbook":
             st.success(
                 runbook["Solution"]
             )
+
+            st.write("### 🧠 Structured Extraction")
+            st.write("**Root-cause signal:**", runbook.get("Structured Evidence", {}).get("Root Cause Signal", "Not extracted"))
+            action_steps = runbook.get("Action Steps", [])
+            if action_steps:
+                st.write("**Reusable action steps:**")
+                for step in action_steps:
+                    st.write(f"• {step}")
 
         with col2:
 
@@ -1674,6 +1933,14 @@ elif page == "📘 Generate Runbook":
             st.write(
                 f"{runbook['Confidence']}%"
             )
+
+        st.write("### 🧪 Verification Steps")
+        verification_steps = runbook.get("Verification Steps", [])
+        if verification_steps:
+            for step in verification_steps:
+                st.write(f"• {step}")
+        else:
+            st.info("No explicit verification sentence was extracted; reviewer verification is still required.")
 
         # ============================================================
         # EVIDENCE BEHIND RECOMMENDATION
@@ -2701,6 +2968,7 @@ elif page == "⚠️ Risk Checker":
                 generated = generate_runbook(pr_id)
                 if generated:
                     st.session_state.runbooks.append(generated)
+                    _db_save_runbook(generated)
                     add_audit("Runbook Generated", f"Runbook generated from Risk Checker for {pr_id}", pr_id=pr_id)
                     st.rerun()
         else:
@@ -2905,7 +3173,7 @@ elif page == "📝 Audit Trail":
             st.session_state.audit_log
         )
 
-        st.caption(f"Prototype audit persistence: {AUDIT_FILE}")
+        st.caption(f"Durable SQLite store: {SQLITE_FILE}  |  CSV export: {AUDIT_FILE}")
 
         st.dataframe(
             audit_df,
@@ -2998,6 +3266,16 @@ elif page == "📊 Validation Dashboard":
             value=30.0
         )
 
+        tester = st.text_input(
+            "Tester / Engineer ID (anonymised)",
+            placeholder="Example: Engineer-01"
+        )
+
+        correctness = st.selectbox(
+            "Recommendation correctness",
+            ["Correct", "Partially Correct", "Incorrect"]
+        )
+
         result = st.selectbox(
             "Result",
             [
@@ -3054,6 +3332,12 @@ elif page == "📊 Validation Dashboard":
                 "Reduction %":
                     reduction,
 
+                "Tester":
+                    tester.strip(),
+
+                "Correctness":
+                    correctness,
+
                 "Result":
                     result,
 
@@ -3069,6 +3353,7 @@ elif page == "📊 Validation Dashboard":
                 EXPERIMENT_FILE,
                 st.session_state.experiment_results
             )
+            _db_save_validation(experiment)
 
             add_audit(
                 "Validation Result Added",
@@ -3111,12 +3396,16 @@ elif page == "📊 Validation Dashboard":
             "Reduction %"
         ].mean()
 
+        median_reduction = results_df["Reduction %"].median()
+        reduction_std = results_df["Reduction %"].std(ddof=1) if len(results_df) > 1 else 0.0
+        regression_count = int((results_df["Reduction %"] < 0).sum())
+        correctness_rate = (results_df["Correctness"] == "Correct").mean() * 100 if "Correctness" in results_df.columns else 0.0
         success_rate = (
             results_df["Result"]
             == "Success"
         ).mean() * 100
 
-        col1, col2, col3, col4, col5 = st.columns(5)
+        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
 
         with col1:
 
@@ -3152,6 +3441,14 @@ elif page == "📊 Validation Dashboard":
                 "Success Rate",
                 f"{success_rate:.1f}%"
             )
+        with col6:
+            st.metric("Median Reduction", f"{median_reduction:.1f}%")
+        with col7:
+            st.metric("Correctness", f"{correctness_rate:.1f}%")
+        with col8:
+            st.metric("Regressions", str(regression_count))
+
+        st.caption(f"Reduction standard deviation: {reduction_std:.1f} percentage points. Negative reduction means the assistant was slower and is retained for error analysis.")
 
         # ----------------------------------------------------
         # TARGET
@@ -3186,6 +3483,20 @@ elif page == "📊 Validation Dashboard":
                 Measured: {avg_reduction:.1f}% reduction
                 """
             )
+
+        # ----------------------------------------------------
+        # STATISTICAL / ERROR ANALYSIS
+        # ----------------------------------------------------
+        st.subheader("📐 Evaluation Analysis")
+        st.write(f"**Cases evaluated:** {len(results_df)}")
+        st.write(f"**Median reduction:** {median_reduction:.1f}%")
+        st.write(f"**Variation (sample SD):** {reduction_std:.1f} percentage points")
+        st.write(f"**Correct recommendations:** {int((results_df.get('Correctness', pd.Series(dtype=str)) == 'Correct').sum()) if 'Correctness' in results_df.columns else 'Not recorded'}")
+        st.write(f"**Regressions (assistant slower):** {regression_count}")
+        if regression_count:
+            st.warning("Regression cases are retained rather than hidden; review their observations before claiming improvement.")
+        else:
+            st.success("No regression cases recorded in the current sample.")
 
         # ----------------------------------------------------
         # RESULTS TABLE
