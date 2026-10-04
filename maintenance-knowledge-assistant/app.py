@@ -1296,6 +1296,272 @@ elif page == "📘 Generate Runbook":
                 f"{runbook['Confidence']}%"
             )
 
+        # ============================================================
+        # EVIDENCE BEHIND RECOMMENDATION
+        # ============================================================
+
+        st.divider()
+
+        st.subheader(
+            "🔎 Evidence Behind Recommendation"
+        )
+
+        st.write(
+            """
+            This section shows the evidence used by the assistant
+            to generate and verify this maintenance runbook.
+            """
+        )
+
+        evidence_col1, evidence_col2 = st.columns(2)
+
+        # ------------------------------------------------------------
+        # Pull Request Evidence
+        # ------------------------------------------------------------
+
+        with evidence_col1:
+
+            st.write(
+                "### 📋 Pull Request Evidence"
+            )
+
+            st.success(
+                f"✓ {runbook['PR_ID']}"
+            )
+
+            st.write(
+                f"**Title:** {runbook['Title']}"
+            )
+
+            st.write(
+                f"**Resolution:** {runbook['Solution']}"
+            )
+
+        # ------------------------------------------------------------
+        # Incident Evidence
+        # ------------------------------------------------------------
+
+        with evidence_col2:
+
+            st.write(
+                "### 🚨 Incident Evidence"
+            )
+
+            incident_evidence = get_incident(
+                runbook["PR_ID"]
+            )
+
+            if incident_evidence is not None:
+
+                st.success(
+                    "✓ Incident discussion found"
+                )
+
+                st.write(
+                    f"**Problem:** "
+                    f"{incident_evidence['Problem']}"
+                )
+
+                st.write(
+                    f"**Resolution:** "
+                    f"{incident_evidence['Final_Resolution']}"
+                )
+
+            else:
+
+                st.warning(
+                    "⚠️ No incident evidence found"
+                )
+
+        # ------------------------------------------------------------
+        # Code Diff Evidence
+        # ------------------------------------------------------------
+
+        st.write(
+            "### 💻 Code Diff Evidence"
+        )
+
+        if (
+            runbook["Changed File"]
+            != "Code diff unavailable."
+        ):
+
+            st.success(
+                "✓ Code diff found"
+            )
+
+            st.write(
+                f"**Changed File:** "
+                f"{runbook['Changed File']}"
+            )
+
+            diff_col1, diff_col2 = st.columns(2)
+
+            with diff_col1:
+
+                st.write(
+                    "**Previous Code**"
+                )
+
+                st.code(
+                    runbook["Old Code"]
+                )
+
+            with diff_col2:
+
+                st.write(
+                    "**Updated Code**"
+                )
+
+                st.code(
+                    runbook["New Code"]
+                )
+
+        else:
+
+            st.error(
+                "❌ Code diff evidence is missing"
+            )
+
+        # ------------------------------------------------------------
+        # Reviewer Evidence
+        # ------------------------------------------------------------
+
+        st.write(
+            "### 👤 Reviewer Evidence"
+        )
+
+        reviewer_col1, reviewer_col2 = st.columns(2)
+
+        with reviewer_col1:
+
+            st.write(
+                "**Reviewer:**"
+            )
+
+            st.write(
+                runbook["Reviewer"]
+            )
+
+        with reviewer_col2:
+
+            st.write(
+                "**Reviewer Status:**"
+            )
+
+            if (
+                runbook["Reviewer Status"]
+                .lower()
+                == "approved"
+            ):
+
+                st.success(
+                    "✓ Approved"
+                )
+
+            else:
+
+                st.warning(
+                    runbook["Reviewer Status"]
+                )
+
+        # ------------------------------------------------------------
+        # Evidence Completeness
+        # ------------------------------------------------------------
+
+        pr_evidence = True
+
+        incident_evidence_available = (
+            incident_evidence is not None
+        )
+
+        diff_evidence = (
+            runbook["Changed File"]
+            != "Code diff unavailable."
+        )
+
+        reviewer_evidence = (
+            runbook["Reviewer Status"]
+            .lower()
+            == "approved"
+        )
+
+        evidence_count = sum(
+            [
+                pr_evidence,
+                incident_evidence_available,
+                diff_evidence,
+                reviewer_evidence
+            ]
+        )
+
+        st.divider()
+
+        st.write(
+            "### 📊 Evidence Completeness"
+        )
+
+        st.metric(
+            "Verified Evidence Sources",
+            f"{evidence_count} / 4"
+        )
+
+        if evidence_count == 4:
+
+            st.success(
+                "✅ All four required evidence sources are available."
+            )
+
+        elif evidence_count >= 2:
+
+            st.warning(
+                "⚠️ Some evidence is missing. "
+                "Human review is recommended."
+            )
+
+        else:
+
+            st.error(
+                "❌ Insufficient evidence for a reliable recommendation."
+            )
+
+        # ------------------------------------------------------------
+        # Why This Recommendation?
+        # ------------------------------------------------------------
+
+        st.write(
+            "### 🧠 Why This Recommendation?"
+        )
+
+        if pr_evidence:
+
+            st.write(
+                "✓ The Pull Request contains the completed fix."
+            )
+
+        if incident_evidence_available:
+
+            st.write(
+                "✓ The Incident discussion explains the original problem."
+            )
+
+        if diff_evidence:
+
+            st.write(
+                "✓ The Code Diff confirms the actual implementation change."
+            )
+
+        if reviewer_evidence:
+
+            st.write(
+                "✓ A reviewer approved the proposed resolution."
+            )
+
+        st.write(
+            f"**Final Confidence: "
+            f"{runbook['Confidence']}%**"
+        )
+
         st.divider()
 
         st.write(
