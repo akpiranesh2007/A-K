@@ -24,10 +24,6 @@ st.markdown(
     """
     <style>
 
-    /* ======================================================
-       GLOBAL APPLICATION
-       ====================================================== */
-
     .stApp {
         background-color: #0b1020 !important;
     }
@@ -41,11 +37,6 @@ st.markdown(
         padding-bottom: 3rem;
     }
 
-
-    /* ======================================================
-       MAIN TEXT
-       ====================================================== */
-
     .stApp p {
         color: #d1d5db !important;
     }
@@ -57,11 +48,6 @@ st.markdown(
     .stApp label {
         color: #dbeafe !important;
     }
-
-
-    /* ======================================================
-       HEADINGS
-       ====================================================== */
 
     .stApp h1 {
         color: #67e8f9 !important;
@@ -77,11 +63,6 @@ st.markdown(
         color: #a5f3fc !important;
         font-weight: 600 !important;
     }
-
-
-    /* ======================================================
-       SIDEBAR
-       ====================================================== */
 
     section[data-testid="stSidebar"] {
         background-color: #111827 !important;
@@ -120,11 +101,6 @@ st.markdown(
         color: #e2e8f0 !important;
     }
 
-
-    /* ======================================================
-       TITLE CARD
-       ====================================================== */
-
     .title-box {
         padding: 30px;
         border-radius: 18px;
@@ -148,11 +124,6 @@ st.markdown(
         font-size: 16px;
     }
 
-
-    /* ======================================================
-       INFORMATION CARD
-       ====================================================== */
-
     .info-box {
         padding: 20px;
         border-radius: 14px;
@@ -168,11 +139,6 @@ st.markdown(
     .info-box p {
         color: #dbeafe !important;
     }
-
-
-    /* ======================================================
-       METRIC CARDS
-       ====================================================== */
 
     [data-testid="stMetric"] {
         background-color: #111827 !important;
@@ -193,11 +159,6 @@ st.markdown(
         color: #cbd5e1 !important;
     }
 
-
-    /* ======================================================
-       TEXT INPUT
-       ====================================================== */
-
     .stTextInput input {
         background-color: #111827 !important;
         color: #f8fafc !important;
@@ -209,11 +170,6 @@ st.markdown(
         border-color: #67e8f9 !important;
         box-shadow: 0 0 0 1px #67e8f9 !important;
     }
-
-
-    /* ======================================================
-       TEXT AREA
-       ====================================================== */
 
     .stTextArea textarea {
         background-color: #111827 !important;
@@ -227,22 +183,12 @@ st.markdown(
         box-shadow: 0 0 0 1px #67e8f9 !important;
     }
 
-
-    /* ======================================================
-       NUMBER INPUT
-       ====================================================== */
-
     .stNumberInput input {
         background-color: #111827 !important;
         color: #f8fafc !important;
         border: 1px solid #475569 !important;
         border-radius: 8px !important;
     }
-
-
-    /* ======================================================
-       SELECT BOX
-       ====================================================== */
 
     div[data-baseweb="select"] > div {
         background-color: #111827 !important;
@@ -253,11 +199,6 @@ st.markdown(
     div[data-baseweb="select"] span {
         color: #f8fafc !important;
     }
-
-
-    /* ======================================================
-       BUTTONS
-       ====================================================== */
 
     .stButton button {
         background-color: #4f46e5 !important;
@@ -273,66 +214,31 @@ st.markdown(
         border-color: #818cf8 !important;
     }
 
-
-    /* ======================================================
-       CHECKBOX
-       ====================================================== */
-
     .stCheckbox label {
         color: #e2e8f0 !important;
     }
 
-
-    /* ======================================================
-       RADIO
-       ====================================================== */
-
     .stRadio label {
         color: #e2e8f0 !important;
     }
-
-
-    /* ======================================================
-       DATAFRAME
-       ====================================================== */
 
     [data-testid="stDataFrame"] {
         border: 1px solid #334155 !important;
         border-radius: 10px !important;
     }
 
-
-    /* ======================================================
-       CODE BLOCK
-       ====================================================== */
-
     [data-testid="stCodeBlock"] {
         border: 1px solid #334155 !important;
         border-radius: 10px !important;
     }
 
-
-    /* ======================================================
-       DIVIDER
-       ====================================================== */
-
     hr {
         border-color: #334155 !important;
     }
 
-
-    /* ======================================================
-       ALERTS
-       ====================================================== */
-
     [data-testid="stAlert"] {
         border-radius: 10px !important;
     }
-
-
-    /* ======================================================
-       SCROLLBAR
-       ====================================================== */
 
     ::-webkit-scrollbar {
         width: 8px;
@@ -407,7 +313,9 @@ try:
 
 except Exception as e:
 
-    st.error("Unable to load the project data.")
+    st.error(
+        "Unable to load the project data."
+    )
 
     st.code(str(e))
 
@@ -447,6 +355,9 @@ if "experiment_results" not in st.session_state:
 
 if "approved_runbooks" not in st.session_state:
     st.session_state.approved_runbooks = []
+
+if "human_confirmations" not in st.session_state:
+    st.session_state.human_confirmations = []
 
 
 # ============================================================
@@ -543,6 +454,24 @@ def get_review(pr_id):
         return None
 
     return result.iloc[0]
+
+
+def is_human_confirmed(pr_id):
+
+    return (
+        pr_id
+        in
+        st.session_state.human_confirmations
+    )
+
+
+def is_trusted(pr_id):
+
+    return (
+        pr_id
+        in
+        st.session_state.approved_runbooks
+    )
 
 
 # ============================================================
@@ -777,11 +706,8 @@ def generate_runbook(pr_id):
 def mock_api_send(pr_id):
 
     pr = get_pr(pr_id)
-
     incident = get_incident(pr_id)
-
     diff = get_diff(pr_id)
-
     review = get_review(pr_id)
 
     payload = {
@@ -958,7 +884,9 @@ Risk Checker
        ↓
 Human Review
        ↓
-Verified Runbook
+Human Confirmation
+       ↓
+Trusted Runbook
        ↓
 Audit Trail
        ↓
@@ -1296,9 +1224,9 @@ elif page == "📘 Generate Runbook":
                 f"{runbook['Confidence']}%"
             )
 
-        # ============================================================
-        # EVIDENCE BEHIND RECOMMENDATION
-        # ============================================================
+        # ====================================================
+        # EVIDENCE
+        # ====================================================
 
         st.divider()
 
@@ -1306,18 +1234,7 @@ elif page == "📘 Generate Runbook":
             "🔎 Evidence Behind Recommendation"
         )
 
-        st.write(
-            """
-            This section shows the evidence used by the assistant
-            to generate and verify this maintenance runbook.
-            """
-        )
-
         evidence_col1, evidence_col2 = st.columns(2)
-
-        # ------------------------------------------------------------
-        # Pull Request Evidence
-        # ------------------------------------------------------------
 
         with evidence_col1:
 
@@ -1336,10 +1253,6 @@ elif page == "📘 Generate Runbook":
             st.write(
                 f"**Resolution:** {runbook['Solution']}"
             )
-
-        # ------------------------------------------------------------
-        # Incident Evidence
-        # ------------------------------------------------------------
 
         with evidence_col2:
 
@@ -1372,10 +1285,6 @@ elif page == "📘 Generate Runbook":
                 st.warning(
                     "⚠️ No incident evidence found"
                 )
-
-        # ------------------------------------------------------------
-        # Code Diff Evidence
-        # ------------------------------------------------------------
 
         st.write(
             "### 💻 Code Diff Evidence"
@@ -1423,10 +1332,6 @@ elif page == "📘 Generate Runbook":
                 "❌ Code diff evidence is missing"
             )
 
-        # ------------------------------------------------------------
-        # Reviewer Evidence
-        # ------------------------------------------------------------
-
         st.write(
             "### 👤 Reviewer Evidence"
         )
@@ -1464,10 +1369,6 @@ elif page == "📘 Generate Runbook":
                 st.warning(
                     runbook["Reviewer Status"]
                 )
-
-        # ------------------------------------------------------------
-        # Evidence Completeness
-        # ------------------------------------------------------------
 
         pr_evidence = True
 
@@ -1524,10 +1425,6 @@ elif page == "📘 Generate Runbook":
             st.error(
                 "❌ Insufficient evidence for a reliable recommendation."
             )
-
-        # ------------------------------------------------------------
-        # Why This Recommendation?
-        # ------------------------------------------------------------
 
         st.write(
             "### 🧠 Why This Recommendation?"
@@ -1675,6 +1572,10 @@ elif page == "✅ Review Runbooks":
 
                 continue
 
+            # ------------------------------------------------
+            # HIGH IMPACT HUMAN CONFIRMATION
+            # ------------------------------------------------
+
             confirmation = True
 
             if runbook["High Impact"]:
@@ -1683,10 +1584,22 @@ elif page == "✅ Review Runbooks":
                     "⚠️ High-impact change detected."
                 )
 
-                confirmation = st.checkbox(
-                    "I confirm that this high-impact runbook has been manually reviewed.",
-                    key=f"confirm_{index}"
-                )
+                if is_human_confirmed(
+                    runbook["PR_ID"]
+                ):
+
+                    st.success(
+                        "✅ Human confirmation already received."
+                    )
+
+                    confirmation = True
+
+                else:
+
+                    confirmation = st.checkbox(
+                        "I confirm that this high-impact runbook has been manually reviewed.",
+                        key=f"confirm_{index}"
+                    )
 
             col1, col2 = st.columns(2)
 
@@ -1908,7 +1821,8 @@ elif page == "🔄 Rollback Manager":
             )
 
             rollback_confirmation = st.checkbox(
-                "I confirm that rollback is required."
+                "I confirm that rollback is required.",
+                key=f"rollback_confirm_{pr_id}"
             )
 
         else:
@@ -2039,25 +1953,162 @@ elif page == "⚠️ Risk Checker":
 
         if high_impact:
 
+            # ------------------------------------------------
+            # HIGH IMPACT
+            # ------------------------------------------------
+
             st.error(
                 "🚨 HIGH-IMPACT CHANGE"
             )
 
-            st.write(
+            st.warning(
                 """
-                Human confirmation is required before
-                this change can become trusted maintenance knowledge.
+                This change has been classified as high-impact.
+
+                Human confirmation is required before this
+                change can become trusted maintenance knowledge.
                 """
             )
 
+            st.divider()
+
+            # ------------------------------------------------
+            # HUMAN CONFIRMATION
+            # ------------------------------------------------
+
+            st.subheader(
+                "👤 Human Confirmation"
+            )
+
+            st.write(
+                """
+                Please review the Pull Request, Incident,
+                Code Diff and Reviewer evidence before confirming.
+                """
+            )
+
+            # Already confirmed?
+            if is_human_confirmed(pr_id):
+
+                st.success(
+                    "✅ Human confirmation already received."
+                )
+
+                st.info(
+                    "This PR has passed the human confirmation gate."
+                )
+
+            else:
+
+                human_confirmation = st.checkbox(
+                    "I confirm that I have manually reviewed this high-impact change and approve it as trusted maintenance knowledge.",
+                    key=f"risk_confirmation_{pr_id}"
+                )
+
+                if human_confirmation:
+
+                    st.success(
+                        "✅ Human confirmation received."
+                    )
+
+                    if st.button(
+                        "🔐 Approve as Trusted Knowledge",
+                        type="primary",
+                        key=f"trust_{pr_id}"
+                    ):
+
+                        if (
+                            pr_id
+                            not in
+                            st.session_state.human_confirmations
+                        ):
+
+                            st.session_state.human_confirmations.append(
+                                pr_id
+                            )
+
+                            add_audit(
+                                "Human Confirmation",
+                                f"{pr_id} manually confirmed as trusted maintenance knowledge"
+                            )
+
+                            st.success(
+                                f"✅ {pr_id} is now approved by human confirmation."
+                            )
+
+                            st.rerun()
+
+                        else:
+
+                            st.info(
+                                f"{pr_id} is already human-confirmed."
+                            )
+
+                else:
+
+                    st.warning(
+                        "⏳ Waiting for human confirmation."
+                    )
+
+                    st.info(
+                        """
+                        The change cannot become trusted maintenance
+                        knowledge until a human reviewer confirms it.
+                        """
+                    )
+
+            # ------------------------------------------------
+            # TRUSTED STATUS
+            # ------------------------------------------------
+
+            st.divider()
+
+            st.subheader(
+                "🔐 Trusted Knowledge Status"
+            )
+
+            if is_trusted(pr_id):
+
+                st.success(
+                    "✅ Trusted maintenance knowledge"
+                )
+
+            elif is_human_confirmed(pr_id):
+
+                st.success(
+                    "✅ Human-confirmed"
+                )
+
+                st.warning(
+                    """
+                    Human confirmation has been completed.
+                    Final runbook approval can now be performed
+                    from the Review Runbooks page.
+                    """
+                )
+
+            else:
+
+                st.error(
+                    "🔒 Not trusted — human confirmation pending."
+                )
+
         else:
+
+            # ------------------------------------------------
+            # NORMAL IMPACT
+            # ------------------------------------------------
 
             st.success(
                 "✅ NORMAL-IMPACT CHANGE"
             )
 
             st.write(
-                "Standard human review can be followed."
+                """
+                This change is classified as normal impact.
+
+                Standard human review can be followed.
+                """
             )
 
 
@@ -2205,8 +2256,8 @@ elif page == "📝 Audit Trail":
     st.write(
         """
         The audit trail records important system actions,
-        including runbook generation, approval, rejection,
-        API reception and rollback.
+        including runbook generation, human confirmation,
+        approval, rejection, API reception and rollback.
         """
     )
 
@@ -2278,10 +2329,6 @@ elif page == "📊 Validation Dashboard":
         The validation data is synthetic/anonymised.
         """
     )
-
-    # --------------------------------------------------------
-    # LOAD SYNTHETIC VALIDATION DATASET
-    # --------------------------------------------------------
 
     validation_file = DATA_DIR / "validation_dataset.csv"
 
@@ -2365,10 +2412,16 @@ elif page == "📊 Validation Dashboard":
                 == "approved"
             ]
 
-            normal_cases = validation_df[
-                validation_df["impact_level"].str.lower()
-                == "normal"
-            ] if "impact_level" in validation_df.columns else pd.DataFrame()
+            if "impact_level" in validation_df.columns:
+
+                normal_cases = validation_df[
+                    validation_df["impact_level"].str.lower()
+                    == "normal"
+                ]
+
+            else:
+
+                normal_cases = pd.DataFrame()
 
             edge_cases = validation_df[
                 (
@@ -2418,7 +2471,7 @@ elif page == "📊 Validation Dashboard":
                 )
 
     # --------------------------------------------------------
-    # BASELINE EXPERIMENT FROM SYNTHETIC DATA
+    # BASELINE EXPERIMENT
     # --------------------------------------------------------
 
     if not validation_df.empty and {
@@ -2451,8 +2504,6 @@ elif page == "📊 Validation Dashboard":
             ]
         )
 
-        # Only reviewer-approved cases are used for the
-        # main repeat-fix effectiveness experiment.
         approved_experiment = experiment_df[
             experiment_df["reviewer_status"].str.lower()
             == "approved"
@@ -2551,13 +2602,13 @@ elif page == "📊 Validation Dashboard":
                 "assistant_minutes",
                 "time_saved",
                 "reduction_percent",
-                "result" if "result" in approved_experiment.columns else None
+                "result"
             ]
 
             display_columns = [
                 column
                 for column in display_columns
-                if column is not None and column in approved_experiment.columns
+                if column in approved_experiment.columns
             ]
 
             st.dataframe(
@@ -2771,19 +2822,39 @@ elif page == "📊 Validation Dashboard":
         col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-            st.metric("Avg Baseline", f"{avg_baseline:.1f} min")
+
+            st.metric(
+                "Avg Baseline",
+                f"{avg_baseline:.1f} min"
+            )
 
         with col2:
-            st.metric("Avg Assistant", f"{avg_assistant:.1f} min")
+
+            st.metric(
+                "Avg Assistant",
+                f"{avg_assistant:.1f} min"
+            )
 
         with col3:
-            st.metric("Avg Time Saved", f"{avg_saved:.1f} min")
+
+            st.metric(
+                "Avg Time Saved",
+                f"{avg_saved:.1f} min"
+            )
 
         with col4:
-            st.metric("Avg Reduction", f"{avg_reduction:.1f}%")
+
+            st.metric(
+                "Avg Reduction",
+                f"{avg_reduction:.1f}%"
+            )
 
         with col5:
-            st.metric("Success Rate", f"{success_rate:.1f}%")
+
+            st.metric(
+                "Success Rate",
+                f"{success_rate:.1f}%"
+            )
 
         st.dataframe(
             results_df,
