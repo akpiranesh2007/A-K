@@ -448,6 +448,9 @@ if "experiment_results" not in st.session_state:
 if "approved_runbooks" not in st.session_state:
     st.session_state.approved_runbooks = []
 
+if "change_review_log" not in st.session_state:
+    st.session_state.change_review_log = []
+
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -2144,7 +2147,7 @@ elif page == "🔌 API Integration":
 elif page == "🔄 Rollback Manager":
 
     st.title(
-        "🔄 Rollback Manager"
+        "🔄 Change Review & Rollback Manager"
     )
 
     st.warning(
@@ -2152,7 +2155,8 @@ elif page == "🔄 Rollback Manager":
         Prototype simulation only.
 
         This feature does NOT modify production code.
-        It records the rollback path and reason.
+        It records the change-review decision and the rollback path.
+        High-impact changes require explicit human confirmation.
         """
     )
 
@@ -2162,13 +2166,202 @@ elif page == "🔄 Rollback Manager":
     )
 
     pr = get_pr(pr_id)
-
     diff = get_diff(pr_id)
 
     if pr is not None:
 
         st.subheader(
             f"{pr_id} - {pr['Title']}"
+        )
+
+        combined_text = (
+            str(pr["Title"])
+            + " "
+            + str(pr["Description"])
+            + " "
+            + str(pr["Resolution"])
+        )
+
+        high_impact = is_high_impact(
+            combined_text
+        )
+
+        # --------------------------------------------------------
+        # CHANGE REVIEW
+        # --------------------------------------------------------
+
+        st.divider()
+
+        st.subheader(
+            "🔍 Change Review"
+        )
+
+        if high_impact:
+
+            st.error(
+                "🚨 HIGH-IMPACT CHANGE"
+            )
+
+            st.write(
+                "Human review and explicit confirmation are required "
+                "before this change can be accepted as a trusted maintenance change."
+            )
+
+        else:
+
+            st.success(
+                "✅ NORMAL-IMPACT CHANGE"
+            )
+
+            st.write(
+                "Standard human change review is required."
+            )
+
+        review_actor = st.text_input(
+            "Reviewer / Change Owner",
+            placeholder="Example: Reviewer001"
+        )
+
+        review_decision = st.radio(
+            "Change Review Decision",
+            [
+                "Approve Change",
+                "Reject Change"
+            ],
+            horizontal=True
+        )
+
+        if high_impact:
+
+            change_confirmation = st.checkbox(
+                "I confirm that I reviewed the high-impact change, "
+                "understand the risk, and have checked the rollback path."
+            )
+
+        else:
+
+            change_confirmation = True
+
+        change_reason = st.text_area(
+            "Change Review Reason",
+            placeholder=(
+                "Explain why this change is approved or rejected..."
+            )
+        )
+
+        if st.button(
+            "📋 Record Change Review",
+            type="primary"
+        ):
+
+            if not review_actor.strip():
+
+                st.error(
+                    "Reviewer / Change Owner is required."
+                )
+
+            elif high_impact and not change_confirmation:
+
+                st.error(
+                    "Explicit human confirmation is required for high-impact changes."
+                )
+
+            elif not change_reason.strip():
+
+                st.error(
+                    "Change review reason is required."
+                )
+
+            else:
+
+                review_record = {
+
+                    "PR_ID":
+                        pr_id,
+
+                    "Reviewer":
+                        review_actor,
+
+                    "Decision":
+                        review_decision,
+
+                    "Risk":
+                        "High Impact" if high_impact else "Normal Impact",
+
+                    "Confirmation":
+                        bool(change_confirmation),
+
+                    "Reason":
+                        change_reason,
+
+                    "Timestamp":
+                        datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+                }
+
+                st.session_state.change_review_log.append(
+                    review_record
+                )
+
+                add_audit(
+                    "Change Review Recorded",
+                    f"{pr_id}: {review_decision}",
+                    pr_id=pr_id,
+                    actor=review_actor,
+                    decision=review_decision,
+                    risk=(
+                        "High Impact"
+                        if high_impact
+                        else "Normal Impact"
+                    ),
+                    reason=change_reason,
+                    confirmation=str(change_confirmation)
+                )
+
+                if review_decision == "Approve Change":
+
+                    st.success(
+                        "✅ Change review approved and recorded."
+                    )
+
+                else:
+
+                    st.warning(
+                        "⚠️ Change review rejected and recorded."
+                    )
+
+        # --------------------------------------------------------
+        # CHANGE REVIEW HISTORY
+        # --------------------------------------------------------
+
+        if st.session_state.change_review_log:
+
+            st.write(
+                "### 📋 Change Review History"
+            )
+
+            st.dataframe(
+                pd.DataFrame(
+                    st.session_state.change_review_log
+                ),
+                use_container_width=True
+            )
+
+        # --------------------------------------------------------
+        # ROLLBACK PATH
+        # --------------------------------------------------------
+
+        st.divider()
+
+        st.subheader(
+            "🔄 Rollback Path"
+        )
+
+        st.write(
+            "The rollback path records what would be restored, "
+            "why rollback is required, and who confirmed it. "
+            "No production code is changed by this prototype."
         )
 
         if diff is not None:
@@ -2195,46 +2388,43 @@ elif page == "🔄 Rollback Manager":
                     str(diff["New_Code"])
                 )
 
-        combined_text = (
-            str(pr["Title"])
-            + " "
-            + str(pr["Description"])
-            + " "
-            + str(pr["Resolution"])
-        )
-
-        high_impact = is_high_impact(
-            combined_text
-        )
-
         if high_impact:
 
-            st.error(
-                "🚨 High-impact change. Human confirmation required."
-            )
-
             rollback_confirmation = st.checkbox(
-                "I confirm that rollback is required."
+                "I confirm that rollback is required and I have reviewed the rollback path."
             )
 
         else:
 
             rollback_confirmation = True
 
+        rollback_actor = st.text_input(
+            "Rollback Reviewer",
+            placeholder="Example: Reviewer001",
+            key=f"rollback_actor_{pr_id}"
+        )
+
         reason = st.text_area(
             "Rollback Reason",
-            placeholder="Explain why the rollback is required..."
+            placeholder="Explain why the rollback is required...",
+            key=f"rollback_reason_{pr_id}"
         )
 
         if st.button(
             "🔄 Record Rollback",
-            type="primary"
+            type="secondary"
         ):
 
-            if not rollback_confirmation:
+            if not rollback_actor.strip():
 
                 st.error(
-                    "Human confirmation is required."
+                    "Rollback reviewer is required."
+                )
+
+            elif not rollback_confirmation:
+
+                st.error(
+                    "Human confirmation is required for this rollback."
                 )
 
             elif not reason.strip():
@@ -2250,8 +2440,17 @@ elif page == "🔄 Rollback Manager":
                     "PR_ID":
                         pr_id,
 
+                    "Reviewer":
+                        rollback_actor,
+
                     "Reason":
                         reason,
+
+                    "Risk":
+                        "High Impact" if high_impact else "Normal Impact",
+
+                    "Confirmation":
+                        bool(rollback_confirmation),
 
                     "Timestamp":
                         datetime.now().strftime(
@@ -2268,11 +2467,21 @@ elif page == "🔄 Rollback Manager":
 
                 add_audit(
                     "Rollback Recorded",
-                    f"{pr_id}: {reason}"
+                    f"{pr_id}: {reason}",
+                    pr_id=pr_id,
+                    actor=rollback_actor,
+                    decision="Rollback",
+                    risk=(
+                        "High Impact"
+                        if high_impact
+                        else "Normal Impact"
+                    ),
+                    reason=reason,
+                    confirmation=str(rollback_confirmation)
                 )
 
                 st.success(
-                    "Rollback path recorded successfully."
+                    "✅ Rollback path recorded successfully."
                 )
 
     if st.session_state.rollback_log:
@@ -2292,6 +2501,7 @@ elif page == "🔄 Rollback Manager":
 
 
 # ============================================================
+
 # RISK CHECKER
 # ============================================================
 
