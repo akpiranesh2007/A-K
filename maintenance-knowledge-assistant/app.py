@@ -359,6 +359,11 @@ if "approved_runbooks" not in st.session_state:
 if "human_confirmations" not in st.session_state:
     st.session_state.human_confirmations = []
 
+# NEW:
+# Stores complete human confirmation information.
+if "human_confirmation_details" not in st.session_state:
+    st.session_state.human_confirmation_details = []
+
 
 # ============================================================
 # HELPER FUNCTIONS
@@ -689,6 +694,22 @@ def generate_runbook(pr_id):
 
         "High Impact":
             high_impact,
+
+        # NEW:
+        "Trust Status":
+            "Pending Human Approval",
+
+        "Human Confirmation":
+            False,
+
+        "Human Reviewer":
+            "",
+
+        "Human Confirmation Note":
+            "",
+
+        "Human Confirmation Timestamp":
+            "",
 
         "Created At":
             datetime.now().strftime(
@@ -1127,6 +1148,26 @@ elif page == "📘 Generate Runbook":
             f"### {runbook['Title']}"
         )
 
+        # NEW TRUST STATUS DISPLAY
+
+        if runbook["Trust Status"] == "Trusted":
+
+            st.success(
+                "🔐 TRUSTED / VERIFIED RUNBOOK"
+            )
+
+        elif runbook["Human Confirmation"]:
+
+            st.warning(
+                "👤 HUMAN CONFIRMED — FINAL APPROVAL PENDING"
+            )
+
+        else:
+
+            st.info(
+                "⏳ PENDING HUMAN APPROVAL"
+            )
+
         col1, col2 = st.columns(2)
 
         with col1:
@@ -1223,6 +1264,46 @@ elif page == "📘 Generate Runbook":
             st.write(
                 f"{runbook['Confidence']}%"
             )
+
+        # HUMAN CONFIRMATION DETAILS
+
+        if runbook["Human Confirmation"]:
+
+            st.divider()
+
+            st.subheader(
+                "👤 Human Confirmation Details"
+            )
+
+            confirmation_col1, confirmation_col2 = st.columns(2)
+
+            with confirmation_col1:
+
+                st.write(
+                    "**Human Reviewer:**"
+                )
+
+                st.write(
+                    runbook["Human Reviewer"]
+                )
+
+                st.write(
+                    "**Confirmation Timestamp:**"
+                )
+
+                st.write(
+                    runbook["Human Confirmation Timestamp"]
+                )
+
+            with confirmation_col2:
+
+                st.write(
+                    "**Confirmation Note:**"
+                )
+
+                st.info(
+                    runbook["Human Confirmation Note"]
+                )
 
         # ====================================================
         # EVIDENCE
@@ -1549,6 +1630,26 @@ elif page == "✅ Review Runbooks":
                 f"**{runbook['Verification Status']}**"
             )
 
+            # TRUST STATUS
+
+            if runbook["Trust Status"] == "Trusted":
+
+                st.success(
+                    "🔐 TRUSTED / VERIFIED"
+                )
+
+            elif runbook["Human Confirmation"]:
+
+                st.warning(
+                    "👤 HUMAN CONFIRMED — FINAL APPROVAL PENDING"
+                )
+
+            else:
+
+                st.info(
+                    "⏳ PENDING HUMAN APPROVAL"
+                )
+
             if (
                 runbook["Changed File"]
                 == "Code diff unavailable."
@@ -1601,6 +1702,43 @@ elif page == "✅ Review Runbooks":
                         key=f"confirm_{index}"
                     )
 
+                    # ------------------------------------------------
+                    # HUMAN REVIEWER DETAILS
+                    # ------------------------------------------------
+
+                    if confirmation:
+
+                        human_reviewer = st.text_input(
+                            "Human Reviewer Name",
+                            placeholder="Example: Maintenance Engineer",
+                            key=f"reviewer_{index}"
+                        )
+
+                        human_note = st.text_area(
+                            "Human Confirmation Note",
+                            placeholder=(
+                                "Explain what was checked before "
+                                "approving this high-impact runbook."
+                            ),
+                            key=f"human_note_{index}"
+                        )
+
+            else:
+
+                human_reviewer = st.text_input(
+                    "Human Reviewer Name",
+                    placeholder="Example: Maintenance Engineer",
+                    key=f"normal_reviewer_{index}"
+                )
+
+                human_note = st.text_area(
+                    "Review Note",
+                    placeholder=(
+                        "Add a short note explaining the review."
+                    ),
+                    key=f"normal_note_{index}"
+                )
+
             col1, col2 = st.columns(2)
 
             with col1:
@@ -1616,7 +1754,101 @@ elif page == "✅ Review Runbooks":
                             "Human confirmation is required."
                         )
 
+                    elif not human_reviewer.strip():
+
+                        st.error(
+                            "Please enter the human reviewer name."
+                        )
+
+                    elif not human_note.strip():
+
+                        st.error(
+                            "Please provide a human review note."
+                        )
+
                     else:
+
+                        timestamp = datetime.now().strftime(
+                            "%Y-%m-%d %H:%M:%S"
+                        )
+
+                        # ------------------------------------------------
+                        # SAVE HUMAN CONFIRMATION
+                        # ------------------------------------------------
+
+                        if (
+                            runbook["PR_ID"]
+                            not in
+                            st.session_state.human_confirmations
+                        ):
+
+                            st.session_state.human_confirmations.append(
+                                runbook["PR_ID"]
+                            )
+
+                        # Update runbook itself
+
+                        runbook["Human Confirmation"] = True
+
+                        runbook["Human Reviewer"] = (
+                            human_reviewer
+                        )
+
+                        runbook["Human Confirmation Note"] = (
+                            human_note
+                        )
+
+                        runbook["Human Confirmation Timestamp"] = (
+                            timestamp
+                        )
+
+                        # ------------------------------------------------
+                        # TRUST STATUS
+                        # ------------------------------------------------
+
+                        runbook["Trust Status"] = "Trusted"
+
+                        # ------------------------------------------------
+                        # SAVE DETAILED CONFIRMATION RECORD
+                        # ------------------------------------------------
+
+                        confirmation_record = {
+
+                            "PR_ID":
+                                runbook["PR_ID"],
+
+                            "Reviewer":
+                                human_reviewer,
+
+                            "Confirmation":
+                                "Confirmed",
+
+                            "Timestamp":
+                                timestamp,
+
+                            "Reason":
+                                human_note
+                        }
+
+                        # Avoid duplicate confirmation records
+
+                        existing_records = [
+                            record
+                            for record
+                            in st.session_state.human_confirmation_details
+                            if record["PR_ID"]
+                            == runbook["PR_ID"]
+                        ]
+
+                        if not existing_records:
+
+                            st.session_state.human_confirmation_details.append(
+                                confirmation_record
+                            )
+
+                        # ------------------------------------------------
+                        # APPROVED RUNBOOK
+                        # ------------------------------------------------
 
                         if (
                             runbook["PR_ID"]
@@ -1628,14 +1860,33 @@ elif page == "✅ Review Runbooks":
                                 runbook["PR_ID"]
                             )
 
+                        # ------------------------------------------------
+                        # AUDIT LOG
+                        # ------------------------------------------------
+
+                        add_audit(
+                            "Human Confirmation",
+                            (
+                                f"{runbook['PR_ID']} confirmed by "
+                                f"{human_reviewer}. "
+                                f"Note: {human_note}"
+                            )
+                        )
+
                         add_audit(
                             "Runbook Approved",
-                            f"{runbook['PR_ID']} approved by human reviewer"
+                            (
+                                f"{runbook['PR_ID']} approved by "
+                                f"{human_reviewer}. "
+                                f"Trust Status: Trusted"
+                            )
                         )
 
                         st.success(
-                            "Runbook approved successfully."
+                            "✅ Runbook approved and marked as TRUSTED."
                         )
+
+                        st.rerun()
 
             with col2:
 
@@ -1657,21 +1908,30 @@ elif page == "✅ Review Runbooks":
 
                     else:
 
+                        runbook["Trust Status"] = "Rejected"
+
                         add_audit(
                             "Runbook Rejected",
-                            f"{runbook['PR_ID']}: {reject_reason}"
+                            (
+                                f"{runbook['PR_ID']}: "
+                                f"{reject_reason}"
+                            )
                         )
 
                         st.warning(
                             "Runbook rejected."
                         )
 
+    # --------------------------------------------------------
+    # APPROVED RUNBOOKS
+    # --------------------------------------------------------
+
     if st.session_state.approved_runbooks:
 
         st.divider()
 
         st.subheader(
-            "✅ Approved Runbooks"
+            "✅ Trusted / Approved Runbooks"
         )
 
         for item in (
@@ -1679,7 +1939,7 @@ elif page == "✅ Review Runbooks":
         ):
 
             st.success(
-                item
+                f"🔐 {item} — TRUSTED"
             )
 
 
@@ -1972,10 +2232,6 @@ elif page == "⚠️ Risk Checker":
 
             st.divider()
 
-            # ------------------------------------------------
-            # HUMAN CONFIRMATION
-            # ------------------------------------------------
-
             st.subheader(
                 "👤 Human Confirmation"
             )
@@ -1988,11 +2244,40 @@ elif page == "⚠️ Risk Checker":
             )
 
             # Already confirmed?
+
             if is_human_confirmed(pr_id):
 
                 st.success(
                     "✅ Human confirmation already received."
                 )
+
+                # Display saved details
+
+                matching_records = [
+                    record
+                    for record
+                    in st.session_state.human_confirmation_details
+                    if record["PR_ID"] == pr_id
+                ]
+
+                if matching_records:
+
+                    latest_record = matching_records[-1]
+
+                    st.write(
+                        f"**Reviewer:** "
+                        f"{latest_record['Reviewer']}"
+                    )
+
+                    st.write(
+                        f"**Timestamp:** "
+                        f"{latest_record['Timestamp']}"
+                    )
+
+                    st.info(
+                        f"**Confirmation Note:** "
+                        f"{latest_record['Reason']}"
+                    )
 
                 st.info(
                     "This PR has passed the human confirmation gate."
@@ -2011,25 +2296,114 @@ elif page == "⚠️ Risk Checker":
                         "✅ Human confirmation received."
                     )
 
+                    reviewer_name = st.text_input(
+                        "Human Reviewer Name",
+                        placeholder="Example: Maintenance Engineer",
+                        key=f"risk_reviewer_{pr_id}"
+                    )
+
+                    confirmation_reason = st.text_area(
+                        "Confirmation Note",
+                        placeholder=(
+                            "Explain what was reviewed before "
+                            "approving this change as trusted "
+                            "maintenance knowledge."
+                        ),
+                        key=f"risk_reason_{pr_id}"
+                    )
+
                     if st.button(
                         "🔐 Approve as Trusted Knowledge",
                         type="primary",
                         key=f"trust_{pr_id}"
                     ):
 
-                        if (
-                            pr_id
-                            not in
-                            st.session_state.human_confirmations
-                        ):
+                        if not reviewer_name.strip():
 
-                            st.session_state.human_confirmations.append(
-                                pr_id
+                            st.error(
+                                "Please enter the human reviewer name."
                             )
+
+                        elif not confirmation_reason.strip():
+
+                            st.error(
+                                "Please provide a confirmation note."
+                            )
+
+                        else:
+
+                            timestamp = datetime.now().strftime(
+                                "%Y-%m-%d %H:%M:%S"
+                            )
+
+                            if (
+                                pr_id
+                                not in
+                                st.session_state.human_confirmations
+                            ):
+
+                                st.session_state.human_confirmations.append(
+                                    pr_id
+                                )
+
+                            confirmation_record = {
+
+                                "PR_ID":
+                                    pr_id,
+
+                                "Reviewer":
+                                    reviewer_name,
+
+                                "Confirmation":
+                                    "Confirmed",
+
+                                "Timestamp":
+                                    timestamp,
+
+                                "Reason":
+                                    confirmation_reason
+                            }
+
+                            st.session_state.human_confirmation_details.append(
+                                confirmation_record
+                            )
+
+                            # Update existing runbook if available
+
+                            for existing_runbook in st.session_state.runbooks:
+
+                                if (
+                                    existing_runbook["PR_ID"]
+                                    == pr_id
+                                ):
+
+                                    existing_runbook[
+                                        "Human Confirmation"
+                                    ] = True
+
+                                    existing_runbook[
+                                        "Human Reviewer"
+                                    ] = reviewer_name
+
+                                    existing_runbook[
+                                        "Human Confirmation Note"
+                                    ] = confirmation_reason
+
+                                    existing_runbook[
+                                        "Human Confirmation Timestamp"
+                                    ] = timestamp
+
+                                    existing_runbook[
+                                        "Trust Status"
+                                    ] = "Human Confirmed"
 
                             add_audit(
                                 "Human Confirmation",
-                                f"{pr_id} manually confirmed as trusted maintenance knowledge"
+                                (
+                                    f"{pr_id} manually confirmed by "
+                                    f"{reviewer_name}. "
+                                    f"Reason: {confirmation_reason}"
+                                )
                             )
 
                             st.success(
@@ -2037,12 +2411,6 @@ elif page == "⚠️ Risk Checker":
                             )
 
                             st.rerun()
-
-                        else:
-
-                            st.info(
-                                f"{pr_id} is already human-confirmed."
-                            )
 
                 else:
 
@@ -2261,6 +2629,10 @@ elif page == "📝 Audit Trail":
         """
     )
 
+    # --------------------------------------------------------
+    # GENERAL AUDIT LOG
+    # --------------------------------------------------------
+
     if not st.session_state.audit_log:
 
         st.info(
@@ -2282,7 +2654,7 @@ elif page == "📝 Audit Trail":
             "📊 Audit Summary"
         )
 
-        col1, col2, col3 = st.columns(3)
+        col1, col2, col3, col4 = st.columns(4)
 
         with col1:
 
@@ -2304,12 +2676,110 @@ elif page == "📝 Audit Trail":
         with col3:
 
             st.metric(
+                "Human Confirmations",
+                sum(
+                    audit_df["Action"]
+                    == "Human Confirmation"
+                )
+            )
+
+        with col4:
+
+            st.metric(
                 "Approvals",
                 sum(
                     audit_df["Action"]
                     == "Runbook Approved"
                 )
             )
+
+    # --------------------------------------------------------
+    # HUMAN CONFIRMATION RECORDS
+    # --------------------------------------------------------
+
+    st.divider()
+
+    st.subheader(
+        "👤 Human Confirmation Records"
+    )
+
+    if st.session_state.human_confirmation_details:
+
+        confirmation_df = pd.DataFrame(
+            st.session_state.human_confirmation_details
+        )
+
+        st.dataframe(
+            confirmation_df,
+            use_container_width=True
+        )
+
+        st.success(
+            "Human confirmation evidence is recorded with reviewer, timestamp and reason."
+        )
+
+    else:
+
+        st.info(
+            "No human confirmation records yet."
+        )
+
+    # --------------------------------------------------------
+    # TRUSTED RUNBOOK SUMMARY
+    # --------------------------------------------------------
+
+    st.divider()
+
+    st.subheader(
+        "🔐 Trusted Runbook Summary"
+    )
+
+    if st.session_state.approved_runbooks:
+
+        trusted_data = []
+
+        for trusted_pr in st.session_state.approved_runbooks:
+
+            matching_runbooks = [
+                rb
+                for rb in st.session_state.runbooks
+                if rb["PR_ID"] == trusted_pr
+            ]
+
+            if matching_runbooks:
+
+                rb = matching_runbooks[-1]
+
+                trusted_data.append(
+                    {
+                        "PR_ID":
+                            rb["PR_ID"],
+
+                        "Trust Status":
+                            rb["Trust Status"],
+
+                        "Human Reviewer":
+                            rb["Human Reviewer"],
+
+                        "Confirmation Timestamp":
+                            rb[
+                                "Human Confirmation Timestamp"
+                            ]
+                    }
+                )
+
+        if trusted_data:
+
+            st.dataframe(
+                pd.DataFrame(trusted_data),
+                use_container_width=True
+            )
+
+    else:
+
+        st.info(
+            "No trusted runbooks yet."
+        )
 
 
 # ============================================================
