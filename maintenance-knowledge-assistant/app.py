@@ -560,16 +560,21 @@ def generate_runbook(pr_id):
         return None
 
     # --------------------------------------------------------
-    # Confidence
+    # Explainable Confidence
     # --------------------------------------------------------
+    # Each confidence point comes from a visible evidence rule.
+    # PR evidence is required as the base completed-fix source.
+    pr_evidence_score = 40
 
-    confidence = 40
+    incident_evidence_score = (
+        15 if incident is not None else 0
+    )
 
-    if incident is not None:
-        confidence += 15
+    diff_evidence_score = (
+        15 if diff is not None else 0
+    )
 
-    if diff is not None:
-        confidence += 15
+    reviewer_evidence_score = 0
 
     if review is not None:
 
@@ -577,10 +582,13 @@ def generate_runbook(pr_id):
             review["Decision"]
         ).lower() == "approved":
 
-            confidence += 30
+            reviewer_evidence_score = 30
 
     confidence = min(
-        confidence,
+        pr_evidence_score
+        + incident_evidence_score
+        + diff_evidence_score
+        + reviewer_evidence_score,
         100
     )
 
@@ -757,6 +765,13 @@ def generate_runbook(pr_id):
 
         "Confidence":
             confidence,
+
+        "Confidence Rules": {
+            "Pull Request": pr_evidence_score,
+            "Incident Discussion": incident_evidence_score,
+            "Code Diff": diff_evidence_score,
+            "Reviewer Approved": reviewer_evidence_score,
+        },
 
         "High Impact":
             high_impact,
@@ -1560,6 +1575,93 @@ elif page == "📘 Generate Runbook":
         st.write(
             f"**Final Confidence: "
             f"{runbook['Confidence']}%**"
+        )
+
+        # ============================================================
+        # CONFIDENCE RULES EXPLANATION
+        # ============================================================
+
+        st.divider()
+
+        st.subheader(
+            "📐 Confidence Calculation"
+        )
+
+        st.write(
+            "The confidence score is calculated from four explicit "
+            "evidence rules. The score is capped at 100%."
+        )
+
+        confidence_rules = runbook["Confidence Rules"]
+
+        rule_col1, rule_col2 = st.columns(2)
+
+        with rule_col1:
+
+            if confidence_rules["Pull Request"] > 0:
+                st.success(
+                    f"✓ Pull Request available  +{confidence_rules['Pull Request']}"
+                )
+            else:
+                st.error(
+                    "✗ Pull Request evidence missing  +0"
+                )
+
+            if confidence_rules["Incident Discussion"] > 0:
+                st.success(
+                    f"✓ Incident discussion available  +{confidence_rules['Incident Discussion']}"
+                )
+            else:
+                st.warning(
+                    "⚠ Incident discussion unavailable  +0"
+                )
+
+        with rule_col2:
+
+            if confidence_rules["Code Diff"] > 0:
+                st.success(
+                    f"✓ Code diff available  +{confidence_rules['Code Diff']}"
+                )
+            else:
+                st.warning(
+                    "⚠ Code diff unavailable  +0"
+                )
+
+            if confidence_rules["Reviewer Approved"] > 0:
+                st.success(
+                    f"✓ Reviewer approved  +{confidence_rules['Reviewer Approved']}"
+                )
+            else:
+                st.warning(
+                    "⚠ Reviewer approval not confirmed  +0"
+                )
+
+        st.divider()
+
+        st.write(
+            "### 🧮 Score Calculation"
+        )
+
+        score_parts = [
+            confidence_rules["Pull Request"],
+            confidence_rules["Incident Discussion"],
+            confidence_rules["Code Diff"],
+            confidence_rules["Reviewer Approved"],
+        ]
+
+        st.code(
+            " + ".join(str(x) for x in score_parts)
+            + f" = {runbook['Confidence']}%"
+        )
+
+        st.metric(
+            "Final Confidence",
+            f"{runbook['Confidence']}%"
+        )
+
+        st.caption(
+            "Rule weights: PR = 40, Incident = 15, "
+            "Code Diff = 15, Reviewer Approval = 30."
         )
 
         st.divider()
