@@ -695,8 +695,9 @@ def load_persistent_state():
             for r in validation_rows
         ]
 
-        runbook_rows_raw = conn.execute("SELECT * FROM runbooks ORDER BY id").fetchall()
-        runbook_columns = [d[0] for d in conn.description]
+        runbook_cursor = conn.execute("SELECT * FROM runbooks ORDER BY id")
+        runbook_rows_raw = runbook_cursor.fetchall()
+        runbook_columns = [d[0] for d in runbook_cursor.description]
         runbook_rows = []
 
         for row in runbook_rows_raw:
