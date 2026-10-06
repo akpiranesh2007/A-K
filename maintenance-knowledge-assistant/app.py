@@ -381,172 +381,88 @@ def get_db_connection():
 
 
 def init_database():
-    """Create/migrate the SQLite database safely.
+    conn = get_db_connection()
+    cur = conn.cursor()
 
-    If a previous experimental SQLite file is damaged, keep a backup and
-    create a fresh database so the Streamlit app can start normally.
-    The original CSV source files are never touched.
-    """
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS audit_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            timestamp TEXT NOT NULL,
+            action TEXT NOT NULL,
+            details TEXT
+        )
+    """)
 
-    def create_tables(conn):
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS audit_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT,
-                action TEXT,
-                details TEXT
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS runbooks (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pr_id TEXT NOT NULL UNIQUE,
+            title TEXT,
+            problem TEXT,
+            root_cause TEXT,
+            solution TEXT,
+            incident_resolution TEXT,
+            changed_file TEXT,
+            old_code TEXT,
+            new_code TEXT,
+            reviewer TEXT,
+            reviewer_status TEXT,
+            verification TEXT,
+            verification_status TEXT,
+            confidence REAL,
+            high_impact INTEGER,
+            trust_status TEXT DEFAULT 'PENDING HUMAN APPROVAL',
+            created_at TEXT
+        )
+    """)
+
+    # Migrate older runbook databases without deleting existing data.
+    existing_columns = {
+        row[1] for row in cur.execute("PRAGMA table_info(runbooks)").fetchall()
+    }
+
+    migration_columns = {
+        "incident_resolution": "TEXT",
+        "changed_file": "TEXT",
+        "old_code": "TEXT",
+        "new_code": "TEXT",
+        "verification": "TEXT",
+    }
+
+    for column, column_type in migration_columns.items():
+        if column not in existing_columns:
+            cur.execute(
+                f"ALTER TABLE runbooks ADD COLUMN {column} {column_type}"
             )
-        """)
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS runbooks (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pr_id TEXT,
-                title TEXT,
-                problem TEXT,
-                root_cause TEXT,
-                solution TEXT,
-                reviewer TEXT,
-                reviewer_status TEXT,
-                verification_status TEXT,
-                confidence REAL,
-                high_impact INTEGER,
-                trust_status TEXT,
-                created_at TEXT,
-                data TEXT
-            )
-        """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS validation_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            test_case TEXT,
+            tester_id TEXT,
+            baseline_minutes REAL,
+            assistant_minutes REAL,
+            time_saved REAL,
+            reduction_percent REAL,
+            result TEXT,
+            correctness TEXT,
+            observation TEXT,
+            created_at TEXT
+        )
+    """)
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS validation_results (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                test_case TEXT,
-                tester_id TEXT,
-                baseline_minutes REAL,
-                assistant_minutes REAL,
-                time_saved REAL,
-                reduction_percent REAL,
-                result TEXT,
-                correctness TEXT,
-                observation TEXT,
-                created_at TEXT
-            )
-        """)
+    cur.execute("""
+        CREATE TABLE IF NOT EXISTS rollback_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            pr_id TEXT,
+            reason TEXT,
+            timestamp TEXT,
+            status TEXT
+        )
+    """)
 
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS rollback_log (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                pr_id TEXT,
-                reason TEXT,
-                timestamp TEXT,
-                status TEXT
-            )
-        """)
-
-        # Add columns required by newer versions when an older table exists.
-        required = {
-            "runbooks": {
-                "pr_id": "TEXT", "title": "TEXT", "problem": "TEXT",
-                "root_cause": "TEXT", "solution": "TEXT", "reviewer": "TEXT",
-                "reviewer_status": "TEXT", "verification_status": "TEXT",
-                "confidence": "REAL", "high_impact": "INTEGER",
-                "trust_status": "TEXT", "created_at": "TEXT", "data": "TEXT"
-            },
-            "audit_log": {
-                "timestamp": "TEXT", "action": "TEXT", "details": "TEXT"
-            },
-            "validation_results": {
-                "test_case": "TEXT", "tester_id": "TEXT",
-                "baseline_minutes": "REAL", "assistant_minutes": "REAL",
-                "time_saved": "REAL", "reduction_percent": "REAL",
-                "result": "TEXT", "correctness": "TEXT",
-                "observation": "TEXT", "created_at": "TEXT"
-            },
-            "rollback_log": {
-                "pr_id": "TEXT", "reason": "TEXT", "timestamp": "TEXT",
-                "status": "TEXT"
-            }
-        }
-
-        for table, columns in required.items():
-            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
-            for column, column_type in columns.items():
-                if column not in existing:
-                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
-
-        conn.commit()
-
-    # First try the existing database.
-    if DB_PATH.exists():
-        conn = None
-        try:
-            conn = sqlite3.connect(DB_PATH)
-            check = conn.execute("PRAGMA integrity_check").fetchone()
-            if not check or str(check[0]).lower() != "ok":
-                raise sqlite3.DatabaseError("SQLite integrity check failed")
-
-            # A previous prototype may have created a VIEW or another
-            # incompatible object called runbooks. Rebuild the database
-            # if that happens.
-            object_row = conn.execute(
-                "SELECT type FROM sqlite_master WHERE name = 'runbooks'"
-            ).fetchone()
-            if object_row and object_row[0] != "table":
-                raise sqlite3.DatabaseError("runbooks is not a SQLite table")
-
-            create_tables(conn)
-
-            # Verify the exact schema that the current application uses.
-            expected_runbook_columns = {
-                "id", "pr_id", "title", "problem", "root_cause",
-                "solution", "reviewer", "reviewer_status",
-                "verification_status", "confidence", "high_impact",
-                "trust_status", "created_at", "data"
-            }
-            actual_runbook_columns = {
-                r[1] for r in conn.execute(
-                    "PRAGMA table_info(runbooks)"
-                ).fetchall()
-            }
-            if not expected_runbook_columns.issubset(actual_runbook_columns):
-                raise sqlite3.DatabaseError("runbooks schema is incompatible")
-
-            # Final read test. This prevents Streamlit from starting with
-            # a database that later fails during state loading.
-            conn.execute("SELECT id, pr_id, data FROM runbooks ORDER BY id").fetchall()
-            conn.commit()
-            conn.close()
-            return
-
-        except Exception:
-            if conn is not None:
-                try:
-                    conn.close()
-                except Exception:
-                    pass
-
-            # Preserve the old file instead of deleting it.
-            backup = DATA_DIR / (
-                "maintenance_assistant_backup_"
-                + datetime.now().strftime("%Y%m%d_%H%M%S")
-                + ".db"
-            )
-            try:
-                DB_PATH.replace(backup)
-            except Exception:
-                pass
-
-    # Create a clean database.
-    conn = sqlite3.connect(DB_PATH)
-    try:
-        create_tables(conn)
-        conn.execute("SELECT id, pr_id, data FROM runbooks ORDER BY id").fetchall()
-        conn.commit()
-    finally:
-        conn.close()
-
-
+    conn.commit()
+    conn.close()
 
 
 def db_add_audit(action, details):
@@ -560,91 +476,75 @@ def db_add_audit(action, details):
 
 
 def db_save_runbook(runbook):
-    """Persist the complete runbook as JSON plus searchable summary fields."""
-    import json
-
     conn = get_db_connection()
-    try:
-        pr_id = str(runbook.get("PR_ID", ""))
-        created_at = runbook.get(
-            "Created At",
-            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        )
-        payload = json.dumps(runbook, ensure_ascii=False)
-
-        existing = conn.execute(
-            "SELECT id FROM runbooks WHERE pr_id = ? ORDER BY id LIMIT 1",
-            (pr_id,)
-        ).fetchone()
-
-        values = (
-            pr_id,
-            runbook.get("Title", ""),
-            runbook.get("Problem", ""),
-            runbook.get("Root Cause", ""),
-            runbook.get("Solution", ""),
-            runbook.get("Reviewer", ""),
-            runbook.get("Reviewer Status", ""),
-            runbook.get("Verification Status", ""),
-            float(runbook.get("Confidence", 0) or 0),
-            int(bool(runbook.get("High Impact", False))),
-            runbook.get("Trust Status", "PENDING HUMAN APPROVAL"),
-            created_at,
-            payload,
-        )
-
-        if existing:
-            conn.execute("""
-                UPDATE runbooks
-                SET pr_id=?, title=?, problem=?, root_cause=?, solution=?,
-                    reviewer=?, reviewer_status=?, verification_status=?,
-                    confidence=?, high_impact=?, trust_status=?, created_at=?, data=?
-                WHERE id=?
-            """, values + (existing[0],))
-        else:
-            conn.execute("""
-                INSERT INTO runbooks (
-                    pr_id, title, problem, root_cause, solution, reviewer,
-                    reviewer_status, verification_status, confidence,
-                    high_impact, trust_status, created_at, data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, values)
-
-        conn.commit()
-    finally:
-        conn.close()
+    conn.execute("""
+        INSERT INTO runbooks (
+            pr_id, title, problem, root_cause, solution,
+            incident_resolution, changed_file, old_code, new_code,
+            reviewer, reviewer_status, verification, verification_status,
+            confidence, high_impact, trust_status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(pr_id) DO UPDATE SET
+            title=excluded.title,
+            problem=excluded.problem,
+            root_cause=excluded.root_cause,
+            solution=excluded.solution,
+            incident_resolution=excluded.incident_resolution,
+            changed_file=excluded.changed_file,
+            old_code=excluded.old_code,
+            new_code=excluded.new_code,
+            reviewer=excluded.reviewer,
+            reviewer_status=excluded.reviewer_status,
+            verification=excluded.verification,
+            verification_status=excluded.verification_status,
+            confidence=excluded.confidence,
+            high_impact=excluded.high_impact,
+            trust_status=excluded.trust_status,
+            created_at=excluded.created_at
+    """, (
+        runbook.get("PR_ID", ""),
+        runbook.get("Title", ""),
+        runbook.get("Problem", ""),
+        runbook.get("Root Cause", ""),
+        runbook.get("Solution", ""),
+        runbook.get("Incident Resolution", ""),
+        runbook.get("Changed File", ""),
+        runbook.get("Old Code", ""),
+        runbook.get("New Code", ""),
+        runbook.get("Reviewer", ""),
+        runbook.get("Reviewer Status", ""),
+        runbook.get("Verification", ""),
+        runbook.get("Verification Status", ""),
+        runbook.get("Confidence", 0),
+        int(bool(runbook.get("High Impact", False))),
+        runbook.get("Trust Status", "PENDING HUMAN APPROVAL"),
+        runbook.get("Created At", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+    ))
+    conn.commit()
+    conn.close()
 
 
 def db_save_validation(experiment):
     conn = get_db_connection()
-
-    try:
-        conn.execute(
-            """
-            INSERT INTO validation_results (
-                test_case, tester_id, baseline_minutes, assistant_minutes,
-                time_saved, reduction_percent, result, correctness,
-                observation, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                experiment.get("Test Case", ""),
-                experiment.get("Tester ID", ""),
-                float(experiment.get("Baseline Minutes", 0) or 0),
-                float(experiment.get("Assistant Minutes", 0) or 0),
-                float(experiment.get("Time Saved", 0) or 0),
-                float(experiment.get("Reduction %", 0) or 0),
-                experiment.get("Result", ""),
-                experiment.get("Recommendation Correctness", ""),
-                experiment.get("Observation", ""),
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            )
-        )
-        conn.commit()
-
-    finally:
-        conn.close()
-
+    conn.execute("""
+        INSERT INTO validation_results (
+            test_case, tester_id, baseline_minutes, assistant_minutes,
+            time_saved, reduction_percent, result, correctness, observation, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        experiment.get("Test Case", ""),
+        experiment.get("Tester ID", ""),
+        experiment.get("Baseline Minutes", 0),
+        experiment.get("Assistant Minutes", 0),
+        experiment.get("Time Saved", 0),
+        experiment.get("Reduction %", 0),
+        experiment.get("Result", ""),
+        experiment.get("Recommendation Correctness", ""),
+        experiment.get("Observation", ""),
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    ))
+    conn.commit()
+    conn.close()
 
 
 def db_save_rollback(record):
@@ -658,80 +558,21 @@ def db_save_rollback(record):
 
 
 def load_persistent_state():
-    """Load persistent state without pandas SQL schema assumptions."""
-    import json
-
     conn = get_db_connection()
-    try:
-        audit_rows = conn.execute(
-            "SELECT timestamp, action, details FROM audit_log ORDER BY id"
-        ).fetchall()
-        audit = [
-            {"Timestamp": r[0], "Action": r[1], "Details": r[2]}
-            for r in audit_rows
-        ]
-
-        rollback_rows = conn.execute(
-            "SELECT pr_id, reason, timestamp, status FROM rollback_log ORDER BY id"
-        ).fetchall()
-        rollbacks = [
-            {"PR_ID": r[0], "Reason": r[1], "Timestamp": r[2], "Status": r[3]}
-            for r in rollback_rows
-        ]
-
-        validation_rows = conn.execute("""
-            SELECT test_case, tester_id, baseline_minutes, assistant_minutes,
-                   time_saved, reduction_percent, result, correctness, observation
-            FROM validation_results ORDER BY id
-        """).fetchall()
-        validations = [
-            {
-                "Test Case": r[0], "Tester ID": r[1],
-                "Baseline Minutes": r[2], "Assistant Minutes": r[3],
-                "Time Saved": r[4], "Reduction %": r[5],
-                "Result": r[6], "Recommendation Correctness": r[7],
-                "Observation": r[8]
-            }
-            for r in validation_rows
-        ]
-
-        runbook_cursor = conn.execute("SELECT * FROM runbooks ORDER BY id")
-        runbook_rows_raw = runbook_cursor.fetchall()
-        runbook_columns = [d[0] for d in runbook_cursor.description]
-        runbook_rows = []
-
-        for row in runbook_rows_raw:
-            item = dict(zip(runbook_columns, row))
-            data = item.get("data")
-
-            if data:
-                try:
-                    full = json.loads(data)
-                    if isinstance(full, dict):
-                        runbook_rows.append(full)
-                        continue
-                except Exception:
-                    pass
-
-            # Compatibility with older SQLite rows.
-            runbook_rows.append({
-                "PR_ID": item.get("pr_id", ""),
-                "Title": item.get("title", ""),
-                "Problem": item.get("problem", ""),
-                "Root Cause": item.get("root_cause", ""),
-                "Solution": item.get("solution", ""),
-                "Reviewer": item.get("reviewer", ""),
-                "Reviewer Status": item.get("reviewer_status", ""),
-                "Verification Status": item.get("verification_status", ""),
-                "Confidence": item.get("confidence", 0),
-                "High Impact": bool(item.get("high_impact", 0)),
-                "Trust Status": item.get("trust_status", "PENDING HUMAN APPROVAL"),
-                "Created At": item.get("created_at", "")
-            })
-
-        return audit, rollbacks, validations, runbook_rows
-    finally:
-        conn.close()
+    audit = pd.read_sql_query(
+        "SELECT timestamp AS Timestamp, action AS Action, details AS Details FROM audit_log ORDER BY id", conn
+    ).to_dict("records")
+    rollbacks = pd.read_sql_query(
+        "SELECT pr_id AS PR_ID, reason AS Reason, timestamp AS Timestamp, status AS Status FROM rollback_log ORDER BY id", conn
+    ).to_dict("records")
+    validations = pd.read_sql_query(
+        "SELECT test_case AS 'Test Case', tester_id AS 'Tester ID', baseline_minutes AS 'Baseline Minutes', assistant_minutes AS 'Assistant Minutes', time_saved AS 'Time Saved', reduction_percent AS 'Reduction %', result AS Result, correctness AS 'Recommendation Correctness', observation AS Observation FROM validation_results ORDER BY id", conn
+    ).to_dict("records")
+    runbook_rows = pd.read_sql_query(
+        "SELECT * FROM runbooks ORDER BY id", conn
+    ).to_dict("records")
+    conn.close()
+    return audit, rollbacks, validations, runbook_rows
 
 
 # Create the database immediately at application startup.
@@ -800,6 +641,84 @@ except Exception as e:
 
 
 # ============================================================
+# RESTORE COMPLETE RUNBOOKS FROM SQLITE + SOURCE CSV EVIDENCE
+# ============================================================
+
+def restore_runbook_from_saved_row(saved):
+
+    pr_id = str(saved.get("pr_id", ""))
+
+    pr_match = pull_requests[pull_requests["PR_ID"] == pr_id]
+    incident_match = incidents[incidents["PR_ID"] == pr_id]
+    diff_match = code_diffs[code_diffs["PR_ID"] == pr_id]
+    review_match = reviews[reviews["PR_ID"] == pr_id]
+
+    pr = pr_match.iloc[0] if not pr_match.empty else None
+    incident = incident_match.iloc[0] if not incident_match.empty else None
+    diff = diff_match.iloc[0] if not diff_match.empty else None
+    review = review_match.iloc[0] if not review_match.empty else None
+
+    # Values persisted in SQLite take priority; missing fields are
+    # reconstructed from the original synthetic evidence CSVs.
+    title = saved.get("title") or (str(pr["Title"]) if pr is not None else "")
+    problem = saved.get("problem") or (
+        str(incident["Problem"]) if incident is not None
+        else (str(pr["Description"]) if pr is not None else "")
+    )
+    root_cause = saved.get("root_cause") or (
+        str(incident["Discussion"]) if incident is not None else "Incident information unavailable."
+    )
+    solution = saved.get("solution") or (str(pr["Resolution"]) if pr is not None else "")
+    incident_resolution = saved.get("incident_resolution") or (
+        str(incident["Final_Resolution"]) if incident is not None else "Not available."
+    )
+
+    changed_file = saved.get("changed_file") or (
+        str(diff["File"]) if diff is not None else "Code diff unavailable."
+    )
+    old_code = saved.get("old_code") or (
+        str(diff["Old_Code"]) if diff is not None else "Not available."
+    )
+    new_code = saved.get("new_code") or (
+        str(diff["New_Code"]) if diff is not None else "Not available."
+    )
+
+    reviewer = saved.get("reviewer") or (
+        str(review["Reviewer"]) if review is not None else "Unavailable"
+    )
+    reviewer_status = saved.get("reviewer_status") or (
+        str(review["Decision"]) if review is not None else "Unknown"
+    )
+    verification = saved.get("verification") or (
+        str(review["Comment"]) if review is not None else "Reviewer information unavailable."
+    )
+
+    verification_status = saved.get("verification_status") or "Incomplete"
+    confidence = saved.get("confidence", 0)
+    high_impact = bool(saved.get("high_impact", 0))
+
+    return {
+        "PR_ID": pr_id,
+        "Title": title,
+        "Problem": problem,
+        "Root Cause": root_cause,
+        "Solution": solution,
+        "Incident Resolution": incident_resolution,
+        "Changed File": changed_file,
+        "Old Code": old_code,
+        "New Code": new_code,
+        "Reviewer": reviewer,
+        "Reviewer Status": reviewer_status,
+        "Verification": verification,
+        "Verification Status": verification_status,
+        "Confidence": float(confidence or 0),
+        "High Impact": high_impact,
+        "Trust Status": saved.get("trust_status") or "PENDING HUMAN APPROVAL",
+        "Created At": saved.get("created_at") or "",
+    }
+
+
+# ============================================================
 # SESSION STATE
 # ============================================================
 
@@ -834,67 +753,15 @@ if "persistent_state_loaded" not in st.session_state:
     st.session_state.rollback_log = saved_rollbacks
     st.session_state.experiment_results = saved_validations
 
-    # Restore the COMPLETE runbook after a refresh.
-    # Earlier versions rebuilt only a small summary, which removed fields
-    # such as Changed File, Old Code and New Code and caused KeyError.
+    # Restore the complete runbook. Older SQLite rows may contain only
+    # summary fields, so missing evidence is reconstructed from the
+    # original synthetic CSV records.
     for saved in saved_runbooks:
-        if not isinstance(saved, dict):
-            continue
-
-        # Current SQLite rows store the complete runbook using the same
-        # title-style keys used by the Streamlit UI. Older rows may use
-        # lowercase database column names, so support both formats.
-        restored = dict(saved)
-
-        if "PR_ID" not in restored:
-            restored["PR_ID"] = restored.get("pr_id", "")
-        if "Title" not in restored:
-            restored["Title"] = restored.get("title", "")
-        if "Problem" not in restored:
-            restored["Problem"] = restored.get("problem", "")
-        if "Root Cause" not in restored:
-            restored["Root Cause"] = restored.get("root_cause", "")
-        if "Solution" not in restored:
-            restored["Solution"] = restored.get("solution", "")
-        if "Reviewer" not in restored:
-            restored["Reviewer"] = restored.get("reviewer", "")
-        if "Reviewer Status" not in restored:
-            restored["Reviewer Status"] = restored.get("reviewer_status", "")
-        if "Verification Status" not in restored:
-            restored["Verification Status"] = restored.get("verification_status", "")
-        if "Confidence" not in restored:
-            restored["Confidence"] = restored.get("confidence", 0) or 0
-        if "High Impact" not in restored:
-            restored["High Impact"] = bool(restored.get("high_impact", 0))
-        if "Trust Status" not in restored:
-            restored["Trust Status"] = restored.get(
-                "trust_status",
-                "PENDING HUMAN APPROVAL"
-            )
-        if "Created At" not in restored:
-            restored["Created At"] = restored.get("created_at", "")
-
-        # Fields required by the review/evidence screens.
-        restored.setdefault("Changed File", "Code diff unavailable.")
-        restored.setdefault("Old Code", "Not available.")
-        restored.setdefault("New Code", "Not available.")
-        restored.setdefault("Verification", restored.get("Verification Status", ""))
-        restored.setdefault("Confidence Rules", {})
-        restored.setdefault("Incident Resolution", "Not available.")
-        restored.setdefault("Action Steps", [])
-        restored.setdefault("Verification Steps", [])
-        restored.setdefault("Structured Evidence", {})
-        restored.setdefault("Human Review Status", "Pending")
-        restored.setdefault("Human Confirmation", "Required" if restored.get("High Impact") else "Not Required")
-        restored.setdefault("Human Reviewer", "")
-        restored.setdefault("Approval Reason", "")
-        restored.setdefault("Rejection Reason", "")
-
+        restored = restore_runbook_from_saved_row(saved)
         existing = [
             r for r in st.session_state.runbooks
             if r.get("PR_ID") == restored.get("PR_ID")
         ]
-
         if not existing:
             st.session_state.runbooks.append(restored)
 
@@ -2089,22 +1956,22 @@ elif page == "✅ Review Runbooks":
             st.divider()
 
             st.subheader(
-                f"{runbook['PR_ID']} - "
-                f"{runbook['Title']}"
+                f"{runbook.get('PR_ID', '')} - "
+                f"{runbook.get('Title', '')}"
             )
 
             st.write(
                 f"Confidence: "
-                f"**{runbook['Confidence']}%**"
+                f"**{runbook.get('Confidence', 0)}%**"
             )
 
             st.write(
                 f"Verification: "
-                f"**{runbook['Verification Status']}**"
+                f"**{runbook.get('Verification Status', 'Unknown')}**"
             )
 
             if (
-                runbook["Changed File"]
+                runbook.get("Changed File", "Code diff unavailable.")
                 == "Code diff unavailable."
             ):
 
@@ -2115,8 +1982,7 @@ elif page == "✅ Review Runbooks":
                 continue
 
             if (
-                runbook["Reviewer Status"]
-                .lower()
+                str(runbook.get("Reviewer Status", "")).lower()
                 != "approved"
             ):
 
@@ -2128,7 +1994,7 @@ elif page == "✅ Review Runbooks":
 
             confirmation = True
 
-            if runbook["High Impact"]:
+            if runbook.get("High Impact", False):
 
                 st.warning(
                     "⚠️ High-impact change detected."
