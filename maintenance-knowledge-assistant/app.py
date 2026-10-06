@@ -602,6 +602,18 @@ def db_save_validation(experiment):
     conn.close()
 
 
+def db_delete_validation(validation_id):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "DELETE FROM validation_results WHERE id = ?",
+            (int(validation_id),)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def db_save_rollback(record):
     conn = get_db_connection()
     conn.execute(
@@ -621,7 +633,7 @@ def load_persistent_state():
         "SELECT pr_id AS PR_ID, reason AS Reason, timestamp AS Timestamp, status AS Status FROM rollback_log ORDER BY id", conn
     ).to_dict("records")
     validations = pd.read_sql_query(
-        "SELECT test_case AS 'Test Case', tester_id AS 'Tester ID', baseline_minutes AS 'Baseline Minutes', assistant_minutes AS 'Assistant Minutes', time_saved AS 'Time Saved', reduction_percent AS 'Reduction %', result AS Result, correctness AS 'Recommendation Correctness', observation AS Observation FROM validation_results ORDER BY id", conn
+        "SELECT id AS 'Validation ID', test_case AS 'Test Case', tester_id AS 'Tester ID', baseline_minutes AS 'Baseline Minutes', assistant_minutes AS 'Assistant Minutes', time_saved AS 'Time Saved', reduction_percent AS 'Reduction %', result AS Result, correctness AS 'Recommendation Correctness', observation AS Observation, created_at AS 'Created At' FROM validation_results ORDER BY id", conn
     ).to_dict("records")
     runbook_rows = pd.read_sql_query(
         "SELECT * FROM runbooks ORDER BY id", conn
@@ -2644,20 +2656,63 @@ elif page == "📝 Audit Trail":
 
 elif page == "📊 Validation Dashboard":
 
-    st.title(
-        "📊 Validation Dashboard"
-    )
+    st.title("📊 Validation Dashboard")
 
     st.write(
         """
-        Measure whether the assistant reduces the time required
-        for a new engineer to repeat a known maintenance fix.
+        Measure whether the assistant reduces the time required for a new
+        engineer to repeat a known maintenance fix. All validation runs in
+        this prototype are synthetic or simulated unless explicitly stated.
         """
     )
 
-    st.subheader(
-        "➕ Add Experiment Result"
-    )
+    # --------------------------------------------------------
+    # MANAGE EXISTING RESULTS
+    # --------------------------------------------------------
+
+    if st.session_state.experiment_results:
+
+        st.subheader("🗑️ Manage Validation Results")
+
+        validation_options = []
+        validation_lookup = {}
+
+        for idx, row in enumerate(st.session_state.experiment_results):
+            validation_id = row.get("Validation ID")
+            label = (
+                f"{validation_id if validation_id is not None else idx + 1} — "
+                f"{row.get('Test Case', 'Unknown')} — "
+                f"Baseline {float(row.get('Baseline Minutes', 0)):.1f} / "
+                f"Assistant {float(row.get('Assistant Minutes', 0)):.1f}"
+            )
+            validation_options.append(label)
+            validation_lookup[label] = (idx, validation_id)
+
+        selected_validation = st.selectbox(
+            "Select a result to remove",
+            validation_options,
+            key="validation_delete_select"
+        )
+
+        if st.button("🗑️ Delete Selected Result"):
+
+            selected_idx, validation_id = validation_lookup[selected_validation]
+            selected_row = st.session_state.experiment_results[selected_idx]
+
+            if validation_id is not None:
+                db_delete_validation(validation_id)
+
+            st.session_state.experiment_results.pop(selected_idx)
+
+            add_audit(
+                "Validation Result Deleted",
+                f"Deleted validation result: {selected_row.get('Test Case', 'Unknown')}"
+            )
+
+            st.success("Validation result deleted successfully.")
+            st.rerun()
+
+    st.subheader("➕ Add Experiment Result")
 
     col1, col2 = st.columns(2)
 
@@ -2665,13 +2720,19 @@ elif page == "📊 Validation Dashboard":
 
         test_case = st.text_input(
             "Test Case",
-            placeholder="Example: Redis timeout fix"
+            placeholder="Example: PR102 - Database connection retry"
         )
 
         baseline_time = st.number_input(
             "Baseline Time (minutes)",
             min_value=1.0,
-            value=60.0
+            value=60.0,
+            step=1.0
+        )
+
+        tester_id = st.text_input(
+            "Tester / Simulated Engineer ID",
+            placeholder="Example: Engineer-01"
         )
 
     with col2:
@@ -2679,7 +2740,8 @@ elif page == "📊 Validation Dashboard":
         assistant_time = st.number_input(
             "With Assistant (minutes)",
             min_value=1.0,
-            value=30.0
+            value=30.0,
+            step=1.0
         )
 
         result = st.selectbox(
@@ -2691,152 +2753,149 @@ elif page == "📊 Validation Dashboard":
             ]
         )
 
+        correctness = st.selectbox(
+            "Recommendation Correctness",
+            [
+                "Correct",
+                "Partially Correct",
+                "Incorrect",
+                "Not Recorded"
+            ]
+        )
+
     observation = st.text_area(
         "Observation / Error Analysis",
         placeholder="Describe what happened during the test..."
     )
 
-    if st.button(
-        "➕ Add Result",
-        type="primary"
-    ):
+    if st.button("➕ Add Result", type="primary"):
 
-        if not test_case.strip():
+        clean_case = test_case.strip()
+        clean_tester = tester_id.strip() or "Not Recorded"
+        clean_observation = observation.strip()
+
+        if not clean_case:
+
+            st.error("Please enter a test case.")
+
+        elif assistant_time > baseline_time and result == "Success":
 
             st.error(
-                "Please enter a test case."
+                "The assistant was slower than baseline, so Result cannot be Success. "
+                "Use Partial Success or Failure and explain the regression in Error Analysis."
+            )
+
+        elif assistant_time > baseline_time and not clean_observation:
+
+            st.error(
+                "A slower-than-baseline run requires an observation explaining the regression."
             )
 
         else:
 
-            time_saved = (
-                baseline_time
-                - assistant_time
-            )
-
-            reduction = (
-                time_saved
-                / baseline_time
-            ) * 100
+            time_saved = baseline_time - assistant_time
+            reduction = (time_saved / baseline_time) * 100
 
             experiment = {
-
-                "Test Case":
-                    test_case,
-
-                "Baseline Minutes":
-                    baseline_time,
-
-                "Assistant Minutes":
-                    assistant_time,
-
-                "Time Saved":
-                    time_saved,
-
-                "Reduction %":
-                    reduction,
-
-                "Result":
-                    result,
-
-                "Recommendation Correctness":
-                    "Not Recorded",
-
-                "Tester ID":
-                    "Not Recorded",
-
-                "Observation":
-                    observation
+                "Validation ID": None,
+                "Test Case": clean_case,
+                "Tester ID": clean_tester,
+                "Baseline Minutes": float(baseline_time),
+                "Assistant Minutes": float(assistant_time),
+                "Time Saved": float(time_saved),
+                "Reduction %": float(reduction),
+                "Result": result,
+                "Recommendation Correctness": correctness,
+                "Observation": clean_observation,
+                "Created At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-
-            st.session_state.experiment_results.append(
-                experiment
-            )
 
             db_save_validation(experiment)
 
+            # Read back the generated SQLite ID so the delete control can
+            # target the exact persistent record.
+            conn = get_db_connection()
+            row_id = conn.execute(
+                "SELECT id FROM validation_results ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            conn.close()
+
+            if row_id:
+                experiment["Validation ID"] = row_id[0]
+
+            st.session_state.experiment_results.append(experiment)
+
             add_audit(
                 "Validation Result Added",
-                test_case
+                clean_case
             )
 
-            st.success(
-                "Validation result added successfully."
-            )
+            st.success("Validation result added successfully.")
+            st.rerun()
 
-    # ========================================================
+    # --------------------------------------------------------
     # DISPLAY VALIDATION RESULTS
-    # ========================================================
+    # --------------------------------------------------------
 
     if st.session_state.experiment_results:
 
-        results_df = pd.DataFrame(
-            st.session_state.experiment_results
-        )
+        results_df = pd.DataFrame(st.session_state.experiment_results)
 
         st.divider()
+        st.subheader("📈 Experiment Metrics")
 
-        st.subheader(
-            "📈 Experiment Metrics"
+        avg_baseline = results_df["Baseline Minutes"].mean()
+        avg_assistant = results_df["Assistant Minutes"].mean()
+        avg_saved = results_df["Time Saved"].mean()
+        avg_reduction = results_df["Reduction %"].mean()
+        median_reduction = results_df["Reduction %"].median()
+        std_reduction = results_df["Reduction %"].std(ddof=1) if len(results_df) > 1 else 0.0
+        success_rate = (results_df["Result"] == "Success").mean() * 100
+
+        correctness_recorded = results_df[
+            results_df["Recommendation Correctness"].isin(
+                ["Correct", "Partially Correct", "Incorrect"]
+            )
+        ]
+        correctness_rate = (
+            (correctness_recorded["Recommendation Correctness"] == "Correct").mean() * 100
+            if not correctness_recorded.empty else 0.0
         )
 
-        avg_baseline = results_df[
-            "Baseline Minutes"
-        ].mean()
-
-        avg_assistant = results_df[
-            "Assistant Minutes"
-        ].mean()
-
-        avg_saved = results_df[
-            "Time Saved"
-        ].mean()
-
-        avg_reduction = results_df[
-            "Reduction %"
-        ].mean()
-
-        success_rate = (
-            results_df["Result"]
-            == "Success"
-        ).mean() * 100
+        regression_count = int((results_df["Reduction %"] < 0).sum())
 
         col1, col2, col3, col4, col5 = st.columns(5)
 
         with col1:
-
-            st.metric(
-                "Avg Baseline",
-                f"{avg_baseline:.1f} min"
-            )
+            st.metric("Avg Baseline", f"{avg_baseline:.1f} min")
 
         with col2:
-
-            st.metric(
-                "Avg Assistant",
-                f"{avg_assistant:.1f} min"
-            )
+            st.metric("Avg Assistant", f"{avg_assistant:.1f} min")
 
         with col3:
-
-            st.metric(
-                "Avg Time Saved",
-                f"{avg_saved:.1f} min"
-            )
+            st.metric("Avg Time Saved", f"{avg_saved:.1f} min")
 
         with col4:
-
-            st.metric(
-                "Avg Reduction",
-                f"{avg_reduction:.1f}%"
-            )
+            st.metric("Avg Reduction", f"{avg_reduction:.1f}%")
 
         with col5:
+            st.metric("Success Rate", f"{success_rate:.1f}%")
 
-            st.metric(
-                "Success Rate",
-                f"{success_rate:.1f}%"
-            )
+        metric_col1, metric_col2, metric_col3 = st.columns(3)
+
+        with metric_col1:
+            st.metric("Median Reduction", f"{median_reduction:.1f}%")
+
+        with metric_col2:
+            st.metric("Reduction Std Dev", f"{std_reduction:.1f}%")
+
+        with metric_col3:
+            st.metric("Regression Cases", regression_count)
+
+        if not correctness_recorded.empty:
+            st.metric("Correctness Rate", f"{correctness_rate:.1f}%")
+        else:
+            st.info("Recommendation correctness has not been recorded for any run yet.")
 
         # ----------------------------------------------------
         # TARGET
@@ -2844,130 +2903,78 @@ elif page == "📊 Validation Dashboard":
 
         target = 30
 
-        st.subheader(
-            "🎯 Target"
-        )
+        st.subheader("🎯 Target")
 
         if avg_reduction >= target:
-
             st.success(
-                f"""
-                Target achieved!
-
-                Target: {target}% reduction
-
-                Measured: {avg_reduction:.1f}% reduction
-                """
+                f"Target achieved!\n\n"
+                f"Target: {target}% reduction\n\n"
+                f"Measured: {avg_reduction:.1f}% reduction"
             )
-
         else:
-
             st.warning(
-                f"""
-                Target not yet achieved.
-
-                Target: {target}% reduction
-
-                Measured: {avg_reduction:.1f}% reduction
-                """
+                f"Target not yet achieved.\n\n"
+                f"Target: {target}% reduction\n\n"
+                f"Measured: {avg_reduction:.1f}% reduction"
             )
 
         # ----------------------------------------------------
         # RESULTS TABLE
         # ----------------------------------------------------
 
-        st.subheader(
-            "📋 Experiment Results"
-        )
-
-        st.dataframe(
-            results_df,
-            use_container_width=True
-        )
+        st.subheader("📋 Experiment Results")
+        st.dataframe(results_df, use_container_width=True)
 
         # ----------------------------------------------------
-        # SIMPLE VISUAL COMPARISON
+        # TIME COMPARISON
         # ----------------------------------------------------
 
-        st.subheader(
-            "⏱️ Time Comparison"
-        )
+        st.subheader("⏱️ Time Comparison")
 
         for _, row in results_df.iterrows():
 
+            st.write(f"**{row['Test Case']}**")
+
+            baseline = float(row["Baseline Minutes"])
+            assistant = float(row["Assistant Minutes"])
+            percentage = int(min(max((assistant / baseline) * 100, 0), 100))
+
+            st.write(f"Baseline: {baseline:.1f} minutes")
+            st.progress(100)
+            st.write(f"Assistant: {assistant:.1f} minutes")
+            st.progress(percentage)
             st.write(
-                f"**{row['Test Case']}**"
-            )
-
-            baseline = float(
-                row["Baseline Minutes"]
-            )
-
-            assistant = float(
-                row["Assistant Minutes"]
-            )
-
-            percentage = int(
-                min(
-                    (assistant / baseline) * 100,
-                    100
-                )
-            )
-
-            st.write(
-                f"Baseline: {baseline:.1f} minutes"
-            )
-
-            st.progress(
-                100
-            )
-
-            st.write(
-                f"Assistant: {assistant:.1f} minutes"
-            )
-
-            st.progress(
-                percentage
-            )
-
-            st.write(
-                f"Time saved: "
-                f"{row['Time Saved']:.1f} minutes "
+                f"Time saved: {row['Time Saved']:.1f} minutes "
                 f"({row['Reduction %']:.1f}%)"
             )
-
             st.divider()
 
         # ----------------------------------------------------
-        # ERROR ANALYSIS
+        # ERROR / REGRESSION ANALYSIS
         # ----------------------------------------------------
 
-        st.subheader(
-            "🔍 Error Analysis"
-        )
+        st.subheader("🔍 Error Analysis")
 
-        failures = results_df[
-            results_df["Result"] != "Success"
+        problems = results_df[
+            (results_df["Result"] != "Success")
+            | (results_df["Reduction %"] < 0)
+            | (results_df["Recommendation Correctness"] == "Incorrect")
         ]
 
-        if failures.empty:
-
-            st.success(
-                "No failed or partial validation cases recorded."
-            )
-
+        if problems.empty:
+            st.success("No failed, partial, or regression validation cases recorded.")
         else:
-
             st.warning(
-                f"{len(failures)} validation case(s) "
-                "need further analysis."
+                f"{len(problems)} validation case(s) need further analysis."
             )
-
             st.dataframe(
-                failures[
+                problems[
                     [
                         "Test Case",
+                        "Tester ID",
                         "Result",
+                        "Reduction %",
+                        "Recommendation Correctness",
                         "Observation"
                     ]
                 ],
@@ -2975,10 +2982,7 @@ elif page == "📊 Validation Dashboard":
             )
 
     else:
-
-        st.info(
-            "Add experiment results to display validation metrics."
-        )
+        st.info("Add experiment results to display validation metrics.")
 
 
 # ============================================================
