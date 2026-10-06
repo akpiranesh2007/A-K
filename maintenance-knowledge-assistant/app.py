@@ -381,6 +381,13 @@ def get_db_connection():
 
 
 def init_database():
+    """Create/migrate SQLite tables without relying on a UNIQUE constraint.
+
+    Older versions of the prototype created different runbook schemas.
+    The migration below adds every field the current app needs and does not
+    require the old pr_id column to have a UNIQUE constraint.
+    """
+
     conn = get_db_connection()
     cur = conn.cursor()
 
@@ -396,7 +403,7 @@ def init_database():
     cur.execute("""
         CREATE TABLE IF NOT EXISTS runbooks (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            pr_id TEXT NOT NULL UNIQUE,
+            pr_id TEXT,
             title TEXT,
             problem TEXT,
             root_cause TEXT,
@@ -412,21 +419,36 @@ def init_database():
             confidence REAL,
             high_impact INTEGER,
             trust_status TEXT DEFAULT 'PENDING HUMAN APPROVAL',
-            created_at TEXT
+            created_at TEXT,
+            data TEXT
         )
     """)
 
-    # Migrate older runbook databases without deleting existing data.
+    # Migrate ANY older runbook schema in place. We never delete the user's
+    # existing runbook rows and we do not depend on pr_id being UNIQUE.
     existing_columns = {
         row[1] for row in cur.execute("PRAGMA table_info(runbooks)").fetchall()
     }
 
     migration_columns = {
+        "pr_id": "TEXT",
+        "title": "TEXT",
+        "problem": "TEXT",
+        "root_cause": "TEXT",
+        "solution": "TEXT",
         "incident_resolution": "TEXT",
         "changed_file": "TEXT",
         "old_code": "TEXT",
         "new_code": "TEXT",
+        "reviewer": "TEXT",
+        "reviewer_status": "TEXT",
         "verification": "TEXT",
+        "verification_status": "TEXT",
+        "confidence": "REAL",
+        "high_impact": "INTEGER",
+        "trust_status": "TEXT",
+        "created_at": "TEXT",
+        "data": "TEXT",
     }
 
     for column, column_type in migration_columns.items():
@@ -476,52 +498,85 @@ def db_add_audit(action, details):
 
 
 def db_save_runbook(runbook):
+    """Save a complete runbook safely across old and new SQLite schemas.
+
+    IMPORTANT: Do NOT use `ON CONFLICT(pr_id)` here. Older databases may not
+    have a UNIQUE constraint on pr_id, and SQLite then raises:
+    "ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint".
+    We instead find the existing row by pr_id and update it, or insert it.
+    """
+
+    import json
+
     conn = get_db_connection()
-    conn.execute("""
-        INSERT INTO runbooks (
-            pr_id, title, problem, root_cause, solution,
-            incident_resolution, changed_file, old_code, new_code,
-            reviewer, reviewer_status, verification, verification_status,
-            confidence, high_impact, trust_status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(pr_id) DO UPDATE SET
-            title=excluded.title,
-            problem=excluded.problem,
-            root_cause=excluded.root_cause,
-            solution=excluded.solution,
-            incident_resolution=excluded.incident_resolution,
-            changed_file=excluded.changed_file,
-            old_code=excluded.old_code,
-            new_code=excluded.new_code,
-            reviewer=excluded.reviewer,
-            reviewer_status=excluded.reviewer_status,
-            verification=excluded.verification,
-            verification_status=excluded.verification_status,
-            confidence=excluded.confidence,
-            high_impact=excluded.high_impact,
-            trust_status=excluded.trust_status,
-            created_at=excluded.created_at
-    """, (
-        runbook.get("PR_ID", ""),
-        runbook.get("Title", ""),
-        runbook.get("Problem", ""),
-        runbook.get("Root Cause", ""),
-        runbook.get("Solution", ""),
-        runbook.get("Incident Resolution", ""),
-        runbook.get("Changed File", ""),
-        runbook.get("Old Code", ""),
-        runbook.get("New Code", ""),
-        runbook.get("Reviewer", ""),
-        runbook.get("Reviewer Status", ""),
-        runbook.get("Verification", ""),
-        runbook.get("Verification Status", ""),
-        runbook.get("Confidence", 0),
-        int(bool(runbook.get("High Impact", False))),
-        runbook.get("Trust Status", "PENDING HUMAN APPROVAL"),
-        runbook.get("Created At", datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
-    ))
-    conn.commit()
-    conn.close()
+
+    try:
+        pr_id = str(runbook.get("PR_ID", ""))
+        created_at = runbook.get(
+            "Created At",
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
+
+        payload = json.dumps(runbook, ensure_ascii=False)
+
+        values = (
+            pr_id,
+            runbook.get("Title", ""),
+            runbook.get("Problem", ""),
+            runbook.get("Root Cause", ""),
+            runbook.get("Solution", ""),
+            runbook.get("Incident Resolution", ""),
+            runbook.get("Changed File", ""),
+            runbook.get("Old Code", ""),
+            runbook.get("New Code", ""),
+            runbook.get("Reviewer", ""),
+            runbook.get("Reviewer Status", ""),
+            runbook.get("Verification", ""),
+            runbook.get("Verification Status", ""),
+            float(runbook.get("Confidence", 0) or 0),
+            int(bool(runbook.get("High Impact", False))),
+            runbook.get("Trust Status", "PENDING HUMAN APPROVAL"),
+            created_at,
+            payload,
+        )
+
+        existing = conn.execute(
+            "SELECT id FROM runbooks WHERE pr_id = ? ORDER BY id LIMIT 1",
+            (pr_id,)
+        ).fetchone()
+
+        if existing is not None:
+            conn.execute(
+                """
+                UPDATE runbooks
+                SET pr_id = ?, title = ?, problem = ?, root_cause = ?,
+                    solution = ?, incident_resolution = ?, changed_file = ?,
+                    old_code = ?, new_code = ?, reviewer = ?,
+                    reviewer_status = ?, verification = ?,
+                    verification_status = ?, confidence = ?, high_impact = ?,
+                    trust_status = ?, created_at = ?, data = ?
+                WHERE id = ?
+                """,
+                values + (existing[0],)
+            )
+        else:
+            conn.execute(
+                """
+                INSERT INTO runbooks (
+                    pr_id, title, problem, root_cause, solution,
+                    incident_resolution, changed_file, old_code, new_code,
+                    reviewer, reviewer_status, verification,
+                    verification_status, confidence, high_impact,
+                    trust_status, created_at, data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                values
+            )
+
+        conn.commit()
+
+    finally:
+        conn.close()
 
 
 def db_save_validation(experiment):
