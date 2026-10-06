@@ -479,19 +479,52 @@ def init_database():
 
     # First try the existing database.
     if DB_PATH.exists():
+        conn = None
         try:
             conn = sqlite3.connect(DB_PATH)
             check = conn.execute("PRAGMA integrity_check").fetchone()
             if not check or str(check[0]).lower() != "ok":
                 raise sqlite3.DatabaseError("SQLite integrity check failed")
+
+            # A previous prototype may have created a VIEW or another
+            # incompatible object called runbooks. Rebuild the database
+            # if that happens.
+            object_row = conn.execute(
+                "SELECT type FROM sqlite_master WHERE name = 'runbooks'"
+            ).fetchone()
+            if object_row and object_row[0] != "table":
+                raise sqlite3.DatabaseError("runbooks is not a SQLite table")
+
             create_tables(conn)
+
+            # Verify the exact schema that the current application uses.
+            expected_runbook_columns = {
+                "id", "pr_id", "title", "problem", "root_cause",
+                "solution", "reviewer", "reviewer_status",
+                "verification_status", "confidence", "high_impact",
+                "trust_status", "created_at", "data"
+            }
+            actual_runbook_columns = {
+                r[1] for r in conn.execute(
+                    "PRAGMA table_info(runbooks)"
+                ).fetchall()
+            }
+            if not expected_runbook_columns.issubset(actual_runbook_columns):
+                raise sqlite3.DatabaseError("runbooks schema is incompatible")
+
+            # Final read test. This prevents Streamlit from starting with
+            # a database that later fails during state loading.
+            conn.execute("SELECT id, pr_id, data FROM runbooks ORDER BY id").fetchall()
+            conn.commit()
             conn.close()
             return
+
         except Exception:
-            try:
-                conn.close()
-            except Exception:
-                pass
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
             # Preserve the old file instead of deleting it.
             backup = DATA_DIR / (
@@ -508,6 +541,8 @@ def init_database():
     conn = sqlite3.connect(DB_PATH)
     try:
         create_tables(conn)
+        conn.execute("SELECT id, pr_id, data FROM runbooks ORDER BY id").fetchall()
+        conn.commit()
     finally:
         conn.close()
 
