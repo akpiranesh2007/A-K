@@ -474,6 +474,21 @@ def init_database():
     """)
 
     cur.execute("""
+        CREATE TABLE IF NOT EXISTS stakeholder_validation (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            stakeholder_id TEXT,
+            role TEXT,
+            scenario TEXT,
+            rating INTEGER,
+            usefulness TEXT,
+            result TEXT,
+            feedback TEXT,
+            improvement TEXT,
+            created_at TEXT
+        )
+    """)
+
+    cur.execute("""
         CREATE TABLE IF NOT EXISTS rollback_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             pr_id TEXT,
@@ -614,6 +629,43 @@ def db_delete_validation(validation_id):
         conn.close()
 
 
+def db_save_stakeholder_feedback(feedback):
+    conn = get_db_connection()
+    conn.execute(
+        """
+        INSERT INTO stakeholder_validation (
+            stakeholder_id, role, scenario, rating, usefulness,
+            result, feedback, improvement, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            feedback.get("Stakeholder ID", ""),
+            feedback.get("Role", ""),
+            feedback.get("Scenario", ""),
+            int(feedback.get("Rating", 0) or 0),
+            feedback.get("Usefulness", ""),
+            feedback.get("Result", ""),
+            feedback.get("Feedback", ""),
+            feedback.get("Improvement", ""),
+            datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        )
+    )
+    conn.commit()
+    conn.close()
+
+
+def db_delete_stakeholder_feedback(feedback_id):
+    conn = get_db_connection()
+    try:
+        conn.execute(
+            "DELETE FROM stakeholder_validation WHERE id = ?",
+            (int(feedback_id),)
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def db_save_rollback(record):
     conn = get_db_connection()
     conn.execute(
@@ -635,11 +687,14 @@ def load_persistent_state():
     validations = pd.read_sql_query(
         "SELECT id AS 'Validation ID', test_case AS 'Test Case', tester_id AS 'Tester ID', baseline_minutes AS 'Baseline Minutes', assistant_minutes AS 'Assistant Minutes', time_saved AS 'Time Saved', reduction_percent AS 'Reduction %', result AS Result, correctness AS 'Recommendation Correctness', observation AS Observation, created_at AS 'Created At' FROM validation_results ORDER BY id", conn
     ).to_dict("records")
+    stakeholder_feedback = pd.read_sql_query(
+        "SELECT id AS 'Stakeholder Validation ID', stakeholder_id AS 'Stakeholder ID', role AS Role, scenario AS Scenario, rating AS Rating, usefulness AS Usefulness, result AS Result, feedback AS Feedback, improvement AS Improvement, created_at AS 'Created At' FROM stakeholder_validation ORDER BY id", conn
+    ).to_dict("records")
     runbook_rows = pd.read_sql_query(
         "SELECT * FROM runbooks ORDER BY id", conn
     ).to_dict("records")
     conn.close()
-    return audit, rollbacks, validations, runbook_rows
+    return audit, rollbacks, validations, stakeholder_feedback, runbook_rows
 
 
 # Create the database immediately at application startup.
@@ -804,6 +859,9 @@ if "rollback_log" not in st.session_state:
 if "experiment_results" not in st.session_state:
     st.session_state.experiment_results = []
 
+if "stakeholder_feedback" not in st.session_state:
+    st.session_state.stakeholder_feedback = []
+
 if "approved_runbooks" not in st.session_state:
     st.session_state.approved_runbooks = []
 
@@ -813,12 +871,14 @@ if "persistent_state_loaded" not in st.session_state:
         saved_audit,
         saved_rollbacks,
         saved_validations,
+        saved_stakeholder_feedback,
         saved_runbooks
     ) = load_persistent_state()
 
     st.session_state.audit_log = saved_audit
     st.session_state.rollback_log = saved_rollbacks
     st.session_state.experiment_results = saved_validations
+    st.session_state.stakeholder_feedback = saved_stakeholder_feedback
 
     # Restore the complete runbook. Older SQLite rows may contain only
     # summary fields, so missing evidence is reconstructed from the
@@ -1245,7 +1305,8 @@ page = st.sidebar.radio(
         "⚠️ Risk Checker",
         "🧪 Edge Cases",
         "📝 Audit Trail",
-        "📊 Validation Dashboard"
+        "📊 Validation Dashboard",
+        "👥 Stakeholder Validation"
     ]
 )
 
@@ -2983,6 +3044,175 @@ elif page == "📊 Validation Dashboard":
 
     else:
         st.info("Add experiment results to display validation metrics.")
+
+
+# ============================================================
+# STAKEHOLDER / USER VALIDATION
+# ============================================================
+
+elif page == "👥 Stakeholder Validation":
+
+    st.title("👥 Stakeholder / User Validation")
+
+    st.write(
+        "Capture short user-validation feedback on whether a new engineer can understand and reuse a verified maintenance runbook."
+    )
+
+    st.info(
+        "Use an anonymous ID such as Reviewer-01 or Engineer-02. Do not enter personal or confidential information."
+    )
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        stakeholder_id = st.text_input(
+            "Stakeholder / Tester ID",
+            placeholder="Example: Engineer-02"
+        )
+        role = st.selectbox(
+            "Role",
+            [
+                "New Engineer",
+                "Reviewer",
+                "Maintainer",
+                "Developer",
+                "Other"
+            ]
+        )
+        scenario = st.text_input(
+            "Scenario Tested",
+            placeholder="Example: Repeat PR101 Redis timeout fix"
+        )
+
+    with col2:
+        rating = st.slider(
+            "Ease of Reuse Rating (1 = difficult, 5 = very easy)",
+            min_value=1,
+            max_value=5,
+            value=4
+        )
+        usefulness = st.selectbox(
+            "Was the runbook useful?",
+            ["Very useful", "Useful", "Partially useful", "Not useful"]
+        )
+        result = st.selectbox(
+            "Validation Result",
+            ["Passed", "Passed with Minor Issue", "Failed"]
+        )
+
+    feedback = st.text_area(
+        "Stakeholder Feedback",
+        placeholder="What worked well or caused difficulty?"
+    )
+
+    improvement = st.text_area(
+        "Suggested Improvement",
+        placeholder="Example: Add one verification command to the runbook."
+    )
+
+    if st.button("💾 Save Stakeholder Validation", type="primary"):
+
+        clean_id = stakeholder_id.strip()
+        clean_scenario = scenario.strip()
+        clean_feedback = feedback.strip()
+        clean_improvement = improvement.strip()
+
+        if not clean_id:
+            st.error("Please enter a stakeholder / tester ID.")
+        elif not clean_scenario:
+            st.error("Please describe the scenario that was tested.")
+        elif not clean_feedback:
+            st.error("Please record the stakeholder feedback.")
+        else:
+            record = {
+                "Stakeholder Validation ID": None,
+                "Stakeholder ID": clean_id,
+                "Role": role,
+                "Scenario": clean_scenario,
+                "Rating": int(rating),
+                "Usefulness": usefulness,
+                "Result": result,
+                "Feedback": clean_feedback,
+                "Improvement": clean_improvement,
+                "Created At": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            }
+
+            db_save_stakeholder_feedback(record)
+
+            conn = get_db_connection()
+            row_id = conn.execute(
+                "SELECT id FROM stakeholder_validation ORDER BY id DESC LIMIT 1"
+            ).fetchone()
+            conn.close()
+
+            if row_id:
+                record["Stakeholder Validation ID"] = row_id[0]
+
+            st.session_state.stakeholder_feedback.append(record)
+
+            add_audit(
+                "Stakeholder Validation Added",
+                f"{clean_id}: {clean_scenario} ({result})"
+            )
+
+            st.success("Stakeholder validation saved successfully.")
+            st.rerun()
+
+    st.divider()
+    st.subheader("📊 Stakeholder Validation Summary")
+
+    feedback_df = pd.DataFrame(st.session_state.stakeholder_feedback)
+
+    if feedback_df.empty:
+        st.info("No stakeholder validation has been recorded yet.")
+    else:
+        average_rating = feedback_df["Rating"].mean()
+        passed = (feedback_df["Result"].isin(["Passed", "Passed with Minor Issue"])).mean() * 100
+
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            st.metric("Validation Sessions", len(feedback_df))
+        with col2:
+            st.metric("Average Rating", f"{average_rating:.1f}/5")
+        with col3:
+            st.metric("Pass Rate", f"{passed:.1f}%")
+
+        st.subheader("📋 Recorded Feedback")
+        st.dataframe(feedback_df, use_container_width=True)
+
+        st.subheader("🗑️ Manage Stakeholder Feedback")
+        options = []
+        lookup = {}
+        for idx, row in feedback_df.iterrows():
+            sid = row.get("Stakeholder Validation ID")
+            label = (
+                f"{sid if pd.notna(sid) else idx + 1} — "
+                f"{row.get('Stakeholder ID', 'Unknown')} — "
+                f"{row.get('Scenario', 'Unknown')}"
+            )
+            options.append(label)
+            lookup[label] = (idx, int(sid) if pd.notna(sid) else None)
+
+        selected = st.selectbox(
+            "Select a validation record to delete",
+            options,
+            key="stakeholder_delete_select"
+        )
+
+        if st.button("🗑️ Delete Selected Stakeholder Validation"):
+            selected_idx, feedback_id = lookup[selected]
+            selected_row = st.session_state.stakeholder_feedback[selected_idx]
+
+            if feedback_id is not None:
+                db_delete_stakeholder_feedback(feedback_id)
+
+            st.session_state.stakeholder_feedback.pop(selected_idx)
+            add_audit(
+                "Stakeholder Validation Deleted",
+                f"Deleted stakeholder validation: {selected_row.get('Stakeholder ID', 'Unknown')}"
+            )
+            st.success("Stakeholder validation deleted successfully.")
+            st.rerun()
 
 
 # ============================================================
