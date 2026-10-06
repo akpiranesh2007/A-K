@@ -381,27 +381,24 @@ def get_db_connection():
 
 
 def init_database():
-    """Create the SQLite tables and safely migrate older database schemas."""
+    """Create/migrate the SQLite database safely.
+
+    If a previous experimental SQLite file is damaged, keep a backup and
+    create a fresh database so the Streamlit app can start normally.
+    The original CSV source files are never touched.
+    """
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    conn = get_db_connection()
-
-    try:
-        # ---------------------------------------------------------
-        # AUDIT LOG
-        # ---------------------------------------------------------
+    def create_tables(conn):
         conn.execute("""
             CREATE TABLE IF NOT EXISTS audit_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                action TEXT NOT NULL,
+                timestamp TEXT,
+                action TEXT,
                 details TEXT
             )
         """)
 
-        # ---------------------------------------------------------
-        # RUNBOOKS
-        # ---------------------------------------------------------
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runbooks (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -415,14 +412,12 @@ def init_database():
                 verification_status TEXT,
                 confidence REAL,
                 high_impact INTEGER,
-                trust_status TEXT DEFAULT 'PENDING HUMAN APPROVAL',
-                created_at TEXT
+                trust_status TEXT,
+                created_at TEXT,
+                data TEXT
             )
         """)
 
-        # ---------------------------------------------------------
-        # VALIDATION RESULTS
-        # ---------------------------------------------------------
         conn.execute("""
             CREATE TABLE IF NOT EXISTS validation_results (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -439,9 +434,6 @@ def init_database():
             )
         """)
 
-        # ---------------------------------------------------------
-        # ROLLBACK LOG
-        # ---------------------------------------------------------
         conn.execute("""
             CREATE TABLE IF NOT EXISTS rollback_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -452,65 +444,73 @@ def init_database():
             )
         """)
 
-        # ---------------------------------------------------------
-        # SAFE MIGRATION FOR DATABASES CREATED BY EARLIER VERSIONS
-        # ---------------------------------------------------------
-        required_columns = {
+        # Add columns required by newer versions when an older table exists.
+        required = {
             "runbooks": {
-                "pr_id": "TEXT",
-                "title": "TEXT",
-                "problem": "TEXT",
-                "root_cause": "TEXT",
-                "solution": "TEXT",
-                "reviewer": "TEXT",
-                "reviewer_status": "TEXT",
-                "verification_status": "TEXT",
-                "confidence": "REAL",
-                "high_impact": "INTEGER",
-                "trust_status": "TEXT",
-                "created_at": "TEXT",
+                "pr_id": "TEXT", "title": "TEXT", "problem": "TEXT",
+                "root_cause": "TEXT", "solution": "TEXT", "reviewer": "TEXT",
+                "reviewer_status": "TEXT", "verification_status": "TEXT",
+                "confidence": "REAL", "high_impact": "INTEGER",
+                "trust_status": "TEXT", "created_at": "TEXT", "data": "TEXT"
             },
             "audit_log": {
-                "timestamp": "TEXT",
-                "action": "TEXT",
-                "details": "TEXT",
+                "timestamp": "TEXT", "action": "TEXT", "details": "TEXT"
             },
             "validation_results": {
-                "test_case": "TEXT",
-                "tester_id": "TEXT",
-                "baseline_minutes": "REAL",
-                "assistant_minutes": "REAL",
-                "time_saved": "REAL",
-                "reduction_percent": "REAL",
-                "result": "TEXT",
-                "correctness": "TEXT",
-                "observation": "TEXT",
-                "created_at": "TEXT",
+                "test_case": "TEXT", "tester_id": "TEXT",
+                "baseline_minutes": "REAL", "assistant_minutes": "REAL",
+                "time_saved": "REAL", "reduction_percent": "REAL",
+                "result": "TEXT", "correctness": "TEXT",
+                "observation": "TEXT", "created_at": "TEXT"
             },
             "rollback_log": {
-                "pr_id": "TEXT",
-                "reason": "TEXT",
-                "timestamp": "TEXT",
-                "status": "TEXT",
-            },
+                "pr_id": "TEXT", "reason": "TEXT", "timestamp": "TEXT",
+                "status": "TEXT"
+            }
         }
 
-        for table, columns in required_columns.items():
-            existing = {
-                row[1]
-                for row in conn.execute(f"PRAGMA table_info({table})").fetchall()
-            }
-
+        for table, columns in required.items():
+            existing = {r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()}
             for column, column_type in columns.items():
                 if column not in existing:
-                    conn.execute(
-                        f"ALTER TABLE {table} ADD COLUMN {column} {column_type}"
-                    )
+                    conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {column_type}")
 
         conn.commit()
 
+    # First try the existing database.
+    if DB_PATH.exists():
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            check = conn.execute("PRAGMA integrity_check").fetchone()
+            if not check or str(check[0]).lower() != "ok":
+                raise sqlite3.DatabaseError("SQLite integrity check failed")
+            create_tables(conn)
+            conn.close()
+            return
+        except Exception:
+            try:
+                conn.close()
+            except Exception:
+                pass
+
+            # Preserve the old file instead of deleting it.
+            backup = DATA_DIR / (
+                "maintenance_assistant_backup_"
+                + datetime.now().strftime("%Y%m%d_%H%M%S")
+                + ".db"
+            )
+            try:
+                DB_PATH.replace(backup)
+            except Exception:
+                pass
+
+    # Create a clean database.
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        create_tables(conn)
     finally:
         conn.close()
+
 
 
 
@@ -525,19 +525,22 @@ def db_add_audit(action, details):
 
 
 def db_save_runbook(runbook):
-    """Persist a runbook without relying on an old UNIQUE constraint.
+    """Persist the complete runbook as JSON plus searchable summary fields."""
+    import json
 
-    This works with both a fresh database and databases created by
-    earlier versions of the prototype.
-    """
     conn = get_db_connection()
-
     try:
         pr_id = str(runbook.get("PR_ID", ""))
         created_at = runbook.get(
             "Created At",
             datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         )
+        payload = json.dumps(runbook, ensure_ascii=False)
+
+        existing = conn.execute(
+            "SELECT id FROM runbooks WHERE pr_id = ? ORDER BY id LIMIT 1",
+            (pr_id,)
+        ).fetchone()
 
         values = (
             pr_id,
@@ -552,42 +555,29 @@ def db_save_runbook(runbook):
             int(bool(runbook.get("High Impact", False))),
             runbook.get("Trust Status", "PENDING HUMAN APPROVAL"),
             created_at,
+            payload,
         )
 
-        # Update first. This avoids ON CONFLICT problems when an older
-        # database was created without a UNIQUE constraint on pr_id.
-        cur = conn.execute(
-            """
-            UPDATE runbooks
-            SET title=?, problem=?, root_cause=?, solution=?, reviewer=?,
-                reviewer_status=?, verification_status=?, confidence=?,
-                high_impact=?, trust_status=?, created_at=?
-            WHERE pr_id=?
-            """,
-            (
-                values[1], values[2], values[3], values[4], values[5],
-                values[6], values[7], values[8], values[9], values[10],
-                values[11], values[0]
-            )
-        )
-
-        if cur.rowcount == 0:
-            conn.execute(
-                """
+        if existing:
+            conn.execute("""
+                UPDATE runbooks
+                SET pr_id=?, title=?, problem=?, root_cause=?, solution=?,
+                    reviewer=?, reviewer_status=?, verification_status=?,
+                    confidence=?, high_impact=?, trust_status=?, created_at=?, data=?
+                WHERE id=?
+            """, values + (existing[0],))
+        else:
+            conn.execute("""
                 INSERT INTO runbooks (
                     pr_id, title, problem, root_cause, solution, reviewer,
                     reviewer_status, verification_status, confidence,
-                    high_impact, trust_status, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                values
-            )
+                    high_impact, trust_status, created_at, data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, values)
 
         conn.commit()
-
     finally:
         conn.close()
-
 
 
 def db_save_validation(experiment):
@@ -633,21 +623,79 @@ def db_save_rollback(record):
 
 
 def load_persistent_state():
+    """Load persistent state without pandas SQL schema assumptions."""
+    import json
+
     conn = get_db_connection()
-    audit = pd.read_sql_query(
-        "SELECT timestamp AS Timestamp, action AS Action, details AS Details FROM audit_log ORDER BY id", conn
-    ).to_dict("records")
-    rollbacks = pd.read_sql_query(
-        "SELECT pr_id AS PR_ID, reason AS Reason, timestamp AS Timestamp, status AS Status FROM rollback_log ORDER BY id", conn
-    ).to_dict("records")
-    validations = pd.read_sql_query(
-        "SELECT test_case AS 'Test Case', tester_id AS 'Tester ID', baseline_minutes AS 'Baseline Minutes', assistant_minutes AS 'Assistant Minutes', time_saved AS 'Time Saved', reduction_percent AS 'Reduction %', result AS Result, correctness AS 'Recommendation Correctness', observation AS Observation FROM validation_results ORDER BY id", conn
-    ).to_dict("records")
-    runbook_rows = pd.read_sql_query(
-        "SELECT * FROM runbooks ORDER BY id", conn
-    ).to_dict("records")
-    conn.close()
-    return audit, rollbacks, validations, runbook_rows
+    try:
+        audit_rows = conn.execute(
+            "SELECT timestamp, action, details FROM audit_log ORDER BY id"
+        ).fetchall()
+        audit = [
+            {"Timestamp": r[0], "Action": r[1], "Details": r[2]}
+            for r in audit_rows
+        ]
+
+        rollback_rows = conn.execute(
+            "SELECT pr_id, reason, timestamp, status FROM rollback_log ORDER BY id"
+        ).fetchall()
+        rollbacks = [
+            {"PR_ID": r[0], "Reason": r[1], "Timestamp": r[2], "Status": r[3]}
+            for r in rollback_rows
+        ]
+
+        validation_rows = conn.execute("""
+            SELECT test_case, tester_id, baseline_minutes, assistant_minutes,
+                   time_saved, reduction_percent, result, correctness, observation
+            FROM validation_results ORDER BY id
+        """).fetchall()
+        validations = [
+            {
+                "Test Case": r[0], "Tester ID": r[1],
+                "Baseline Minutes": r[2], "Assistant Minutes": r[3],
+                "Time Saved": r[4], "Reduction %": r[5],
+                "Result": r[6], "Recommendation Correctness": r[7],
+                "Observation": r[8]
+            }
+            for r in validation_rows
+        ]
+
+        runbook_rows_raw = conn.execute("SELECT * FROM runbooks ORDER BY id").fetchall()
+        runbook_columns = [d[0] for d in conn.description]
+        runbook_rows = []
+
+        for row in runbook_rows_raw:
+            item = dict(zip(runbook_columns, row))
+            data = item.get("data")
+
+            if data:
+                try:
+                    full = json.loads(data)
+                    if isinstance(full, dict):
+                        runbook_rows.append(full)
+                        continue
+                except Exception:
+                    pass
+
+            # Compatibility with older SQLite rows.
+            runbook_rows.append({
+                "PR_ID": item.get("pr_id", ""),
+                "Title": item.get("title", ""),
+                "Problem": item.get("problem", ""),
+                "Root Cause": item.get("root_cause", ""),
+                "Solution": item.get("solution", ""),
+                "Reviewer": item.get("reviewer", ""),
+                "Reviewer Status": item.get("reviewer_status", ""),
+                "Verification Status": item.get("verification_status", ""),
+                "Confidence": item.get("confidence", 0),
+                "High Impact": bool(item.get("high_impact", 0)),
+                "Trust Status": item.get("trust_status", "PENDING HUMAN APPROVAL"),
+                "Created At": item.get("created_at", "")
+            })
+
+        return audit, rollbacks, validations, runbook_rows
+    finally:
+        conn.close()
 
 
 # Create the database immediately at application startup.
