@@ -362,19 +362,119 @@ st.markdown(
 
 
 # ============================================================
-# PROJECT PATHS
+# PROJECT PATHS AND PERSISTENT STORAGE
 # ============================================================
 
 BASE_DIR = Path(__file__).resolve().parent
 DATA_DIR = BASE_DIR / "data"
+DATA_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DATA_DIR / "maintenance_assistant.db"
 
-# Prototype persistence files. These keep audit/trust state during
-# the Streamlit runtime and make the state visible in the data folder.
-AUDIT_FILE = DATA_DIR / "audit_log.csv"
-TRUST_FILE = DATA_DIR / "trusted_runbooks.csv"
-ROLLBACK_FILE = DATA_DIR / "rollback_log.csv"
-EXPERIMENT_FILE = DATA_DIR / "experiment_results.csv"
-SQLITE_FILE = DATA_DIR / "maintenance_assistant.db"
+
+def get_db():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def init_db():
+    conn = get_db()
+    cur = conn.cursor()
+    cur.execute("""CREATE TABLE IF NOT EXISTS runbooks (
+        pr_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL,
+        trust_status TEXT NOT NULL, human_reviewer TEXT DEFAULT '',
+        approval_reason TEXT DEFAULT '', rejection_reason TEXT DEFAULT '',
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS audit_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL,
+        action TEXT NOT NULL, details TEXT NOT NULL
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS rollback_log (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, pr_id TEXT NOT NULL,
+        reason TEXT NOT NULL, timestamp TEXT NOT NULL, status TEXT NOT NULL
+    )""")
+    cur.execute("""CREATE TABLE IF NOT EXISTS validation_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, tester_id TEXT NOT NULL,
+        test_case TEXT NOT NULL, baseline_minutes REAL NOT NULL,
+        assistant_minutes REAL NOT NULL, time_saved REAL NOT NULL,
+        reduction_pct REAL NOT NULL, result TEXT NOT NULL,
+        correctness TEXT NOT NULL, observation TEXT DEFAULT '', timestamp TEXT NOT NULL
+    )""")
+    conn.commit()
+    conn.close()
+
+
+init_db()
+
+
+def db_runbook_rows():
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM runbooks ORDER BY updated_at DESC").fetchall()
+
+
+def db_audit_rows():
+    with get_db() as conn:
+        return conn.execute("SELECT timestamp AS Timestamp, action AS Action, details AS Details FROM audit_log ORDER BY id").fetchall()
+
+
+def db_rollback_rows():
+    with get_db() as conn:
+        return conn.execute("SELECT pr_id AS PR_ID, reason AS Reason, timestamp AS Timestamp, status AS Status FROM rollback_log ORDER BY id").fetchall()
+
+
+def db_validation_rows():
+    with get_db() as conn:
+        return conn.execute("SELECT * FROM validation_results ORDER BY id").fetchall()
+
+
+def persist_runbook(runbook):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_db() as conn:
+        conn.execute("""INSERT INTO runbooks
+            (pr_id, payload_json, trust_status, human_reviewer, approval_reason, rejection_reason, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(pr_id) DO UPDATE SET
+            payload_json=excluded.payload_json, trust_status=excluded.trust_status,
+            human_reviewer=excluded.human_reviewer, approval_reason=excluded.approval_reason,
+            rejection_reason=excluded.rejection_reason, updated_at=excluded.updated_at""",
+            (runbook["PR_ID"], json.dumps(runbook), runbook.get("Trust Status", "PENDING HUMAN APPROVAL"),
+             runbook.get("Human Reviewer", ""), runbook.get("Approval Reason", ""),
+             runbook.get("Rejection Reason", ""), runbook.get("Created At", now), now))
+
+
+def update_trust(pr_id, status, reviewer="", approval_reason="", rejection_reason=""):
+    rows = db_runbook_rows()
+    payload = None
+    for row in rows:
+        if row["pr_id"] == pr_id:
+            payload = json.loads(row["payload_json"])
+            break
+    if payload is None:
+        return None
+    payload["Trust Status"] = status
+    payload["Human Reviewer"] = reviewer
+    payload["Approval Reason"] = approval_reason
+    payload["Rejection Reason"] = rejection_reason
+    payload["Updated At"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    persist_runbook(payload)
+    return payload
+
+
+def persist_rollback(record):
+    with get_db() as conn:
+        conn.execute("INSERT INTO rollback_log (pr_id, reason, timestamp, status) VALUES (?, ?, ?, ?)",
+                     (record["PR_ID"], record["Reason"], record["Timestamp"], record["Status"]))
+
+
+def persist_validation(record):
+    with get_db() as conn:
+        conn.execute("""INSERT INTO validation_results
+            (tester_id, test_case, baseline_minutes, assistant_minutes, time_saved, reduction_pct, result, correctness, observation, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (record["Tester ID"], record["Test Case"], record["Baseline Minutes"], record["Assistant Minutes"],
+             record["Time Saved"], record["Reduction %"], record["Result"], record["Correctness"],
+             record["Observation"], record["Timestamp"]))
 
 
 # ============================================================
@@ -399,11 +499,6 @@ def load_data():
     reviews = pd.read_csv(
         DATA_DIR / "reviews.csv"
     )
-
-    # Keep identifiers consistent even when CSV readers infer different types.
-    for df in (pull_requests, incidents, code_diffs, reviews):
-        if "PR_ID" in df.columns:
-            df["PR_ID"] = df["PR_ID"].astype(str)
 
     return (
         pull_requests,
@@ -448,503 +543,37 @@ except Exception as e:
 # ============================================================
 
 if "runbooks" not in st.session_state:
-    st.session_state.runbooks = []
+    st.session_state.runbooks = [json.loads(r["payload_json"]) for r in db_runbook_rows()]
 
 if "audit_log" not in st.session_state:
-    st.session_state.audit_log = []
+    st.session_state.audit_log = [dict(r) for r in db_audit_rows()]
 
 if "api_records" not in st.session_state:
     st.session_state.api_records = []
 
 if "rollback_log" not in st.session_state:
-    st.session_state.rollback_log = []
+    st.session_state.rollback_log = [dict(r) for r in db_rollback_rows()]
 
 if "experiment_results" not in st.session_state:
-    st.session_state.experiment_results = []
+    st.session_state.experiment_results = [dict(r) for r in db_validation_rows()]
 
 if "approved_runbooks" not in st.session_state:
-    st.session_state.approved_runbooks = []
-
-if "change_review_log" not in st.session_state:
-    st.session_state.change_review_log = []
-
-if "trusted_metadata" not in st.session_state:
-    st.session_state.trusted_metadata = {}
-
-if "human_confirmations" not in st.session_state:
-    st.session_state.human_confirmations = []
-
-if "persistence_loaded" not in st.session_state:
-    st.session_state.persistence_loaded = False
-
-if "persistence_warning" not in st.session_state:
-    st.session_state.persistence_warning = ""
-
-
-# ============================================================
-# PERSISTENCE + TRUST HELPERS
-# ============================================================
-
-def _db_connect():
-    """Open the durable SQLite store used by the prototype."""
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(SQLITE_FILE, check_same_thread=False)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS records (
-            record_type TEXT NOT NULL,
-            record_key TEXT NOT NULL,
-            payload TEXT NOT NULL,
-            updated_at TEXT NOT NULL,
-            PRIMARY KEY (record_type, record_key)
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS runbooks (
-            pr_id TEXT PRIMARY KEY,
-            title TEXT,
-            trust_status TEXT,
-            risk TEXT,
-            confidence REAL,
-            payload TEXT NOT NULL,
-            updated_at TEXT NOT NULL
-        )
-    """)
-    conn.execute("""
-        CREATE TABLE IF NOT EXISTS validation_results (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            test_case TEXT,
-            baseline_minutes REAL,
-            assistant_minutes REAL,
-            time_saved REAL,
-            reduction_percent REAL,
-            result TEXT,
-            observation TEXT,
-            created_at TEXT NOT NULL
-        )
-    """)
-    conn.commit()
-    return conn
-
-
-def _db_record_type(path):
-    name = Path(path).name
-    return {
-        "audit_log.csv": "audit",
-        "trusted_runbooks.csv": "trusted",
-        "rollback_log.csv": "rollback",
-        "experiment_results.csv": "validation"
-    }.get(name, "general")
-
-
-def _db_read(path):
-    """Read persistent records from SQLite."""
-    record_type = _db_record_type(path)
-    try:
-        conn = _db_connect()
-        rows = conn.execute(
-            "SELECT record_key, payload FROM records WHERE record_type=? ORDER BY record_key",
-            (record_type,)
-        ).fetchall()
-        conn.close()
-        return [json.loads(payload) for _, payload in rows]
-    except Exception as e:
-        st.session_state.persistence_warning = str(e)
-        return []
-
-
-def _db_write(path, records):
-    """Replace a record collection in SQLite and keep a CSV export for transparency."""
-    record_type = _db_record_type(path)
-    try:
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn = _db_connect()
-        conn.execute("DELETE FROM records WHERE record_type=?", (record_type,))
-        for i, row in enumerate(records):
-            key = str(row.get("PR_ID", row.get("Test Case", i))) + "::" + str(i)
-            conn.execute(
-                "INSERT OR REPLACE INTO records(record_type,record_key,payload,updated_at) VALUES(?,?,?,?)",
-                (record_type, key, json.dumps(row, default=str), now)
-            )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.session_state.persistence_warning = str(e)
-        return False
-
-
-def _db_save_runbook(runbook):
-    try:
-        conn = _db_connect()
-        now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-        conn.execute(
-            """INSERT OR REPLACE INTO runbooks
-            (pr_id,title,trust_status,risk,confidence,payload,updated_at)
-            VALUES(?,?,?,?,?,?,?)""",
-            (
-                str(runbook.get("PR_ID", "")),
-                str(runbook.get("Title", "")),
-                str(runbook.get("Trust Status", "")),
-                "High Impact" if runbook.get("High Impact", False) else "Normal Impact",
-                float(runbook.get("Confidence", 0)),
-                json.dumps(runbook, default=str),
-                now
-            )
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.session_state.persistence_warning = str(e)
-        return False
-
-
-def _db_load_runbooks():
-    try:
-        conn = _db_connect()
-        rows = conn.execute("SELECT payload FROM runbooks ORDER BY updated_at").fetchall()
-        conn.close()
-        return [json.loads(row[0]) for row in rows]
-    except Exception as e:
-        st.session_state.persistence_warning = str(e)
-        return []
-
-
-def _db_save_validation(experiment):
-    try:
-        conn = _db_connect()
-        conn.execute(
-            """INSERT INTO validation_results
-            (test_case,baseline_minutes,assistant_minutes,time_saved,reduction_percent,result,observation,created_at)
-            VALUES(?,?,?,?,?,?,?,?)""",
-            (
-                experiment.get("Test Case", ""),
-                float(experiment.get("Baseline Minutes", 0)),
-                float(experiment.get("Assistant Minutes", 0)),
-                float(experiment.get("Time Saved", 0)),
-                float(experiment.get("Reduction %", 0)),
-                experiment.get("Result", ""),
-                experiment.get("Observation", ""),
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-            )
-        )
-        conn.commit()
-        conn.close()
-        return True
-    except Exception as e:
-        st.session_state.persistence_warning = str(e)
-        return False
-
-
-def _read_records(path):
-    """Read durable SQLite records first, with CSV fallback for migration."""
-    db_records = _db_read(path)
-    if db_records:
-        return db_records
-    try:
-        if not path.exists():
-            return []
-        df = pd.read_csv(path).fillna("")
-        records = df.to_dict("records")
-        if records:
-            _db_write(path, records)
-        return records
-    except Exception as e:
-        st.session_state.persistence_warning = str(e)
-        return []
-
-
-def _write_records(path, records):
-    """Persist records durably in SQLite and also export CSV for inspection."""
-    try:
-        DATA_DIR.mkdir(parents=True, exist_ok=True)
-        db_ok = _db_write(path, records)
-        pd.DataFrame(records).to_csv(path, index=False)
-        return db_ok
-    except Exception as e:
-        st.session_state.persistence_warning = str(e)
-        return False
-
-
-def _load_persistent_state():
-    if st.session_state.persistence_loaded:
-        return
-
-    # Runbooks are indexed durably in SQLite.
-    persisted_runbooks = _db_load_runbooks()
-    if persisted_runbooks:
-        st.session_state.runbooks = persisted_runbooks
-
-    # Audit
-    audit_records = _read_records(AUDIT_FILE)
-    if audit_records:
-        st.session_state.audit_log = audit_records
-
-    # Rollback
-    rollback_records = _read_records(ROLLBACK_FILE)
-    if rollback_records:
-        st.session_state.rollback_log = rollback_records
-
-    # Validation experiments
-    experiment_records = _read_records(EXPERIMENT_FILE)
-    if experiment_records:
-        st.session_state.experiment_results = experiment_records
-
-    # Trusted runbooks
-    trusted_records = _read_records(TRUST_FILE)
-    for row in trusted_records:
-        pr_id = str(row.get("PR_ID", "")).strip()
-        if not pr_id:
-            continue
-        st.session_state.trusted_metadata[pr_id] = row
-        if pr_id not in st.session_state.approved_runbooks:
-            st.session_state.approved_runbooks.append(pr_id)
-        if str(row.get("Human_Confirmed", "")).lower() in {"yes", "true", "1"}:
-            if pr_id not in st.session_state.human_confirmations:
-                st.session_state.human_confirmations.append(pr_id)
-
-    st.session_state.persistence_loaded = True
-
-
-def _persist_trusted_state():
-    rows = []
-    for pr_id, meta in st.session_state.trusted_metadata.items():
-        rows.append({
-            "PR_ID": pr_id,
-            "Trust_Status": meta.get("Trust_Status", "TRUSTED / VERIFIED"),
-            "Human_Confirmed": meta.get("Human_Confirmed", "Not Required"),
-            "Human_Reviewer": meta.get("Human_Reviewer", ""),
-            "Approval_Reason": meta.get("Approval_Reason", ""),
-            "Approved_At": meta.get("Approved_At", ""),
-            "High_Impact": meta.get("High_Impact", "False")
-        })
-    _write_records(TRUST_FILE, rows)
-
-
-def _sync_runbook_trust(runbook):
-    """Always add trust fields so old/new runbooks cannot raise KeyError."""
-    pr_id = str(runbook.get("PR_ID", ""))
-    meta = st.session_state.trusted_metadata.get(pr_id)
-
-    if meta:
-        runbook["Trust Status"] = "TRUSTED / VERIFIED"
-        runbook["Human Review Status"] = "Approved"
-        runbook["Human Confirmation"] = meta.get("Human_Confirmed", "Not Required")
-        runbook["Human Reviewer"] = meta.get("Human_Reviewer", "")
-        runbook["Approval Reason"] = meta.get("Approval_Reason", "")
-        runbook["Approved At"] = meta.get("Approved_At", "")
-    elif runbook.get("Verification Status", "Incomplete") == "Verified":
-        runbook["Trust Status"] = "PENDING HUMAN APPROVAL"
-        runbook["Human Review Status"] = "Pending"
-        runbook["Human Confirmation"] = "Required" if runbook.get("High Impact", False) else "Not Required"
-        runbook.setdefault("Human Reviewer", "")
-        runbook.setdefault("Approval Reason", "")
-        runbook.setdefault("Approved At", "")
-    else:
-        runbook["Trust Status"] = "NOT ELIGIBLE"
-        runbook["Human Review Status"] = "Pending Evidence"
-        runbook["Human Confirmation"] = "Required" if runbook.get("High Impact", False) else "Not Required"
-        runbook.setdefault("Human Reviewer", "")
-        runbook.setdefault("Approval Reason", "")
-        runbook.setdefault("Approved At", "")
-
-    runbook.setdefault("Rejection Reason", "")
-    runbook.setdefault("Rejected At", "")
-    return runbook
-
-
-def _find_runbook(pr_id):
-    for runbook in st.session_state.runbooks:
-        if str(runbook.get("PR_ID", "")) == str(pr_id):
-            return runbook
-    return None
-
-
-def approve_runbook(runbook, reviewer_name, approval_reason, high_impact_confirmation=False, decision="Approve"):
-    """Single approval gate used by the human-review workflow."""
-    pr_id = str(runbook.get("PR_ID", ""))
-    reviewer_name = str(reviewer_name).strip()
-    approval_reason = str(approval_reason).strip()
-
-    if not reviewer_name:
-        return False, "Human reviewer name is required."
-    if not approval_reason:
-        return False, "Approval reason is required."
-    if get_diff(pr_id) is None:
-        return False, "Approval blocked: code diff evidence is missing."
-    if get_incident(pr_id) is None:
-        return False, "Approval blocked: incident evidence is missing."
-    if str(runbook.get("Reviewer Status", "")).lower() != "approved":
-        return False, "Approval blocked: source reviewer approval is required."
-    if str(runbook.get("Verification Status", "")) != "Verified":
-        return False, "Approval blocked: evidence verification is incomplete."
-    if runbook.get("High Impact", False) and not high_impact_confirmation:
-        return False, "Explicit human confirmation is required for this high-impact runbook."
-
-    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    confirmation_text = "Yes" if runbook.get("High Impact", False) else "Not Required"
-
-    runbook["Trust Status"] = "TRUSTED / VERIFIED"
-    runbook["Human Review Status"] = "Approved" if decision == "Approve" else "Overridden"
-    runbook["Human Confirmation"] = confirmation_text
-    runbook["Human Reviewer"] = reviewer_name
-    runbook["Approval Reason"] = approval_reason
-    runbook["Approved At"] = now
-    runbook["Rejection Reason"] = ""
-    runbook["Rejected At"] = ""
-
-    if pr_id not in st.session_state.approved_runbooks:
-        st.session_state.approved_runbooks.append(pr_id)
-
-    if runbook.get("High Impact", False) and pr_id not in st.session_state.human_confirmations:
-        st.session_state.human_confirmations.append(pr_id)
-
-    st.session_state.trusted_metadata[pr_id] = {
-        "Trust_Status": "TRUSTED / VERIFIED",
-        "Human_Confirmed": confirmation_text,
-        "Human_Reviewer": reviewer_name,
-        "Approval_Reason": approval_reason,
-        "Approved_At": now,
-        "High_Impact": str(runbook.get("High Impact", False))
-    }
-    _persist_trusted_state()
-    _db_save_runbook(runbook)
-
-    add_audit(
-        "Runbook Approved" if decision == "Approve" else "Runbook Override",
-        f"{pr_id} trusted by {reviewer_name}.",
-        pr_id=pr_id,
-        actor=reviewer_name,
-        decision=decision,
-        risk="High Impact" if runbook.get("High Impact", False) else "Normal Impact",
-        reason=approval_reason,
-        confirmation=confirmation_text
-    )
-    return True, "Runbook is now TRUSTED / VERIFIED."
-
-
-def reject_runbook(runbook, reviewer_name, rejection_reason):
-    pr_id = str(runbook.get("PR_ID", ""))
-    reviewer_name = str(reviewer_name).strip()
-    rejection_reason = str(rejection_reason).strip()
-    if not reviewer_name:
-        return False, "Human reviewer name is required."
-    if not rejection_reason:
-        return False, "Rejection reason is required."
-
     st.session_state.approved_runbooks = [
-        x for x in st.session_state.approved_runbooks
-        if str(x) != pr_id
+        r["pr_id"] for r in db_runbook_rows() if r["trust_status"] == "TRUSTED / VERIFIED"
     ]
-    st.session_state.trusted_metadata.pop(pr_id, None)
-    st.session_state.human_confirmations = [
-        x for x in st.session_state.human_confirmations
-        if str(x) != pr_id
-    ]
-    _persist_trusted_state()
-    _db_save_runbook(runbook)
-
-    runbook["Trust Status"] = "REJECTED"
-    runbook["Human Review Status"] = "Rejected"
-    runbook["Human Reviewer"] = reviewer_name
-    runbook["Rejection Reason"] = rejection_reason
-    runbook["Rejected At"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    add_audit(
-        "Runbook Rejected",
-        f"{pr_id} rejected by {reviewer_name}.",
-        pr_id=pr_id,
-        actor=reviewer_name,
-        decision="Reject",
-        risk="High Impact" if runbook.get("High Impact", False) else "Normal Impact",
-        reason=rejection_reason,
-        confirmation=str(runbook.get("Human Confirmation", "Not Required"))
-    )
-    return True, "Runbook rejected and reason recorded."
-
-
-def revoke_trust(runbook, reviewer_name, reason):
-    pr_id = str(runbook.get("PR_ID", ""))
-    reviewer_name = str(reviewer_name).strip()
-    reason = str(reason).strip()
-    if not reviewer_name:
-        return False, "Reviewer name is required."
-    if not reason:
-        return False, "Revocation reason is required."
-
-    st.session_state.trusted_metadata.pop(pr_id, None)
-    st.session_state.approved_runbooks = [x for x in st.session_state.approved_runbooks if str(x) != pr_id]
-    st.session_state.human_confirmations = [x for x in st.session_state.human_confirmations if str(x) != pr_id]
-    _persist_trusted_state()
-    _db_save_runbook(runbook)
-
-    runbook["Trust Status"] = "REVOKED"
-    runbook["Human Review Status"] = "Trust Revoked"
-    add_audit(
-        "Trust Revoked",
-        f"Trusted status revoked for {pr_id} by {reviewer_name}.",
-        pr_id=pr_id,
-        actor=reviewer_name,
-        decision="Revoke Trust",
-        risk="High Impact" if runbook.get("High Impact", False) else "Normal Impact",
-        reason=reason,
-        confirmation=str(runbook.get("Human Confirmation", "Not Required"))
-    )
-    return True, "Trust revoked."
 
 
 # ============================================================
 # HELPER FUNCTIONS
 # ============================================================
 
-def add_audit(
-    action,
-    details,
-    pr_id="",
-    actor="System",
-    decision="",
-    risk="",
-    reason="",
-    confirmation=""
-):
-
-    st.session_state.audit_log.append(
-        {
-            "Timestamp":
-                datetime.now().strftime(
-                    "%Y-%m-%d %H:%M:%S"
-                ),
-
-            "Actor":
-                actor,
-
-            "Action":
-                action,
-
-            "PR_ID":
-                pr_id,
-
-            "Decision":
-                decision,
-
-            "Risk":
-                risk,
-
-            "Confirmation":
-                confirmation,
-
-            "Reason":
-                reason,
-
-            "Details":
-                details
-        }
-    )
-
-    _write_records(
-        AUDIT_FILE,
-        st.session_state.audit_log
-    )
+def add_audit(action, details):
+    timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    record = {"Timestamp": timestamp, "Action": action, "Details": details}
+    st.session_state.audit_log.append(record)
+    with get_db() as conn:
+        conn.execute("INSERT INTO audit_log (timestamp, action, details) VALUES (?, ?, ?)",
+                     (timestamp, action, details))
 
 
 def is_high_impact(text):
@@ -1021,69 +650,63 @@ def get_review(pr_id):
     return result.iloc[0]
 
 
-_load_persistent_state()
+# ============================================================
+# STRUCTURED EXTRACTION
+# ============================================================
+
+def split_sentences(text):
+    text = str(text or "").strip()
+    if not text:
+        return []
+    parts = re.split(r"(?<=[.!?])\s+|\n+|\s*;\s*", text)
+    return [p.strip(" -•") for p in parts if p.strip(" -•")]
+
+
+def extract_root_cause_signals(text):
+    sentences = split_sentences(text)
+    keywords = [
+        "because", "caused", "root cause", "due to", "failure",
+        "timeout", "missing", "misconfigured", "incorrect", "error",
+        "exception", "bug", "issue", "dependency"
+    ]
+    matches = [s for s in sentences if any(k in s.lower() for k in keywords)]
+    return matches[:3] if matches else sentences[:2]
+
+
+def extract_action_steps(text):
+    sentences = split_sentences(text)
+    action_words = [
+        "update", "change", "replace", "add", "remove", "configure",
+        "set", "modify", "fix", "restart", "deploy", "install", "enable", "disable"
+    ]
+    matches = [s for s in sentences if any(k in s.lower() for k in action_words)]
+    return matches[:5] if matches else sentences[:3]
+
+
+def extract_verification_steps(text):
+    sentences = split_sentences(text)
+    verification_words = [
+        "verify", "test", "tested", "check", "confirmed", "pass",
+        "passed", "validate", "validation", "working", "monitor"
+    ]
+    matches = [s for s in sentences if any(k in s.lower() for k in verification_words)]
+    return matches[:4]
+
+
+def evidence_summary(pr, incident, diff, review):
+    sources = ["Pull Request"]
+    if incident is not None:
+        sources.append("Incident Discussion")
+    if diff is not None:
+        sources.append("Code Diff")
+    if review is not None and str(review["Decision"]).lower() == "approved":
+        sources.append("Approved Review")
+    return sources
 
 
 # ============================================================
 # RUNBOOK GENERATOR
 # ============================================================
-
-# ============================================================
-# STRUCTURED EXTRACTION / LIGHTWEIGHT NLP
-# ============================================================
-
-def _sentences(text):
-    text = re.sub(r"\s+", " ", str(text or "")).strip()
-    if not text:
-        return []
-    return [x.strip(" .") for x in re.split(r"(?<=[.!?])\s+|[;|]", text) if x.strip()]
-
-
-def extract_root_cause(problem, discussion, resolution):
-    """Extract root-cause evidence using transparent phrase/sentence rules."""
-    source = f"{problem}. {discussion}. {resolution}"
-    cause_terms = ("because", "caused by", "root cause", "due to", "incorrect", "missing", "expired", "timeout", "misconfigured", "configuration", "permission")
-    candidates = [s for s in _sentences(source) if any(t in s.lower() for t in cause_terms)]
-    if candidates:
-        return candidates[0]
-    discussion_sentences = _sentences(discussion)
-    if discussion_sentences:
-        return discussion_sentences[0]
-    return "Root cause could not be confidently extracted from the available evidence."
-
-
-def extract_action_steps(resolution, new_code):
-    """Turn resolution/change evidence into short reusable action steps."""
-    source = f"{resolution}. {new_code}"
-    sentences = _sentences(source)
-    steps = []
-    action_words = ("update", "change", "replace", "add", "remove", "set", "configure", "restart", "deploy", "enable", "disable", "modify", "fix")
-    for sentence in sentences:
-        if any(word in sentence.lower() for word in action_words):
-            steps.append(sentence)
-    if not steps and resolution:
-        steps.append(str(resolution).strip())
-    return steps[:5]
-
-
-def extract_verification_steps(resolution, discussion):
-    source = f"{resolution}. {discussion}"
-    verification_words = ("verify", "test", "confirm", "validated", "working", "resolved", "monitor", "check")
-    found = [s for s in _sentences(source) if any(w in s.lower() for w in verification_words)]
-    return found[:5]
-
-
-def build_structured_evidence(problem, discussion, resolution, new_code):
-    root = extract_root_cause(problem, discussion, resolution)
-    actions = extract_action_steps(resolution, new_code)
-    verification_steps = extract_verification_steps(resolution, discussion)
-    return {
-        "Root Cause Signal": root,
-        "Action Steps": actions,
-        "Verification Steps": verification_steps,
-        "Extraction Method": "Transparent phrase/sentence rules",
-    }
-
 
 def generate_runbook(pr_id):
 
@@ -1096,21 +719,16 @@ def generate_runbook(pr_id):
         return None
 
     # --------------------------------------------------------
-    # Explainable Confidence
+    # Confidence
     # --------------------------------------------------------
-    # Each confidence point comes from a visible evidence rule.
-    # PR evidence is required as the base completed-fix source.
-    pr_evidence_score = 40
 
-    incident_evidence_score = (
-        15 if incident is not None else 0
-    )
+    confidence = 40
 
-    diff_evidence_score = (
-        15 if diff is not None else 0
-    )
+    if incident is not None:
+        confidence += 15
 
-    reviewer_evidence_score = 0
+    if diff is not None:
+        confidence += 15
 
     if review is not None:
 
@@ -1118,13 +736,10 @@ def generate_runbook(pr_id):
             review["Decision"]
         ).lower() == "approved":
 
-            reviewer_evidence_score = 30
+            confidence += 30
 
     confidence = min(
-        pr_evidence_score
-        + incident_evidence_score
-        + diff_evidence_score
-        + reviewer_evidence_score,
+        confidence,
         100
     )
 
@@ -1162,17 +777,11 @@ def generate_runbook(pr_id):
 
     if incident is None:
 
-        problem = str(
-            pr["Description"]
-        )
-
-        root_cause = (
-            "Incident information unavailable."
-        )
-
-        incident_resolution = (
-            "Not available."
-        )
+        discussion = ""
+        root_cause_signals = []
+        problem = str(pr["Description"])
+        root_cause = "Incident information unavailable."
+        incident_resolution = "Not available."
 
     else:
 
@@ -1180,13 +789,13 @@ def generate_runbook(pr_id):
             incident["Problem"]
         )
 
-        root_cause = str(
-            incident["Discussion"]
+        discussion = str(incident["Discussion"])
+        root_cause_signals = extract_root_cause_signals(discussion)
+        root_cause = (
+            root_cause_signals[0] if root_cause_signals
+            else "Root cause could not be extracted from the discussion."
         )
-
-        incident_resolution = str(
-            incident["Final_Resolution"]
-        )
+        incident_resolution = str(incident["Final_Resolution"])
 
     # --------------------------------------------------------
     # Code diff
@@ -1215,16 +824,6 @@ def generate_runbook(pr_id):
         new_code = str(
             diff["New_Code"]
         )
-
-    # --------------------------------------------------------
-    # Structured extraction / lightweight NLP
-    # --------------------------------------------------------
-    structured_evidence = build_structured_evidence(
-        problem,
-        root_cause if incident is not None else "",
-        str(pr["Resolution"]),
-        new_code if diff is not None else ""
-    )
 
     # --------------------------------------------------------
     # Verification
@@ -1280,22 +879,25 @@ def generate_runbook(pr_id):
             problem,
 
         "Root Cause":
-            structured_evidence["Root Cause Signal"],
-
-        "Structured Evidence":
-            structured_evidence,
-
-        "Action Steps":
-            structured_evidence["Action Steps"],
-
-        "Verification Steps":
-            structured_evidence["Verification Steps"],
+            root_cause,
 
         "Solution":
             str(pr["Resolution"]),
 
         "Incident Resolution":
             incident_resolution,
+
+        "Root Cause Signals":
+            root_cause_signals,
+
+        "Action Steps":
+            extract_action_steps(str(pr["Resolution"])),
+
+        "Verification Steps":
+            extract_verification_steps(str(review["Comment"]) if review is not None else ""),
+
+        "Evidence Sources":
+            evidence_summary(pr, incident, diff, review),
 
         "Changed File":
             changed_file,
@@ -1321,26 +923,11 @@ def generate_runbook(pr_id):
         "Confidence":
             confidence,
 
-        "Confidence Rules": {
-            "Pull Request": pr_evidence_score,
-            "Incident Discussion": incident_evidence_score,
-            "Code Diff": diff_evidence_score,
-            "Reviewer Approved": reviewer_evidence_score,
-        },
-
         "High Impact":
             high_impact,
 
-        # Trust/verification fields are ALWAYS present. This prevents
-        # KeyError when older runbooks are loaded or generated.
         "Trust Status":
-            "PENDING HUMAN APPROVAL" if verification_status == "Verified" else "NOT ELIGIBLE",
-
-        "Human Review Status":
-            "Pending",
-
-        "Human Confirmation":
-            "Required" if high_impact else "Not Required",
+            "PENDING HUMAN APPROVAL",
 
         "Human Reviewer":
             "",
@@ -1348,13 +935,7 @@ def generate_runbook(pr_id):
         "Approval Reason":
             "",
 
-        "Approved At":
-            "",
-
         "Rejection Reason":
-            "",
-
-        "Rejected At":
             "",
 
         "Created At":
@@ -1363,7 +944,7 @@ def generate_runbook(pr_id):
             )
     }
 
-    return _sync_runbook_trust(runbook)
+    return runbook
 
 
 # ============================================================
@@ -1561,8 +1142,6 @@ Audit Trail
 Validation
         """
     )
-
-    st.success(f"🗄️ Persistent storage active: SQLite database at `{SQLITE_FILE.name}`")
 
     st.markdown(
         """
@@ -1768,25 +1347,17 @@ elif page == "📘 Generate Runbook":
 
         if runbook is not None:
 
-            existing = _find_runbook(pr_id)
+            # Replace an existing runbook for the same PR instead of creating duplicates.
+            st.session_state.runbooks = [
+                r for r in st.session_state.runbooks if r.get("PR_ID") != pr_id
+            ]
+            st.session_state.runbooks.append(runbook)
+            persist_runbook(runbook)
 
-            if existing is None:
-                st.session_state.runbooks.append(runbook)
-                _db_save_runbook(runbook)
-                add_audit(
-                    "Runbook Generated",
-                    f"Runbook generated for {pr_id}",
-                    pr_id=pr_id
-                )
-            else:
-                existing.clear()
-                existing.update(runbook)
-                _db_save_runbook(existing)
-                add_audit(
-                    "Runbook Regenerated",
-                    f"Runbook regenerated for {pr_id}",
-                    pr_id=pr_id
-                )
+            add_audit(
+                "Runbook Generated",
+                f"Runbook generated for {pr_id}"
+            )
 
             st.success(
                 "Runbook generated successfully!"
@@ -1828,6 +1399,17 @@ elif page == "📘 Generate Runbook":
                 runbook["Root Cause"]
             )
 
+            st.write("### Extracted Root-Cause Signals")
+            if runbook.get("Root Cause Signals"):
+                for signal in runbook["Root Cause Signals"]:
+                    st.write(f"• {signal}")
+            else:
+                st.write("No strong root-cause signal extracted.")
+
+            st.write("### Reusable Action Steps")
+            for step_no, step in enumerate(runbook.get("Action Steps", []), 1):
+                st.write(f"{step_no}. {step}")
+
             st.write(
                 "### Solution"
             )
@@ -1835,14 +1417,6 @@ elif page == "📘 Generate Runbook":
             st.success(
                 runbook["Solution"]
             )
-
-            st.write("### 🧠 Structured Extraction")
-            st.write("**Root-cause signal:**", runbook.get("Structured Evidence", {}).get("Root Cause Signal", "Not extracted"))
-            action_steps = runbook.get("Action Steps", [])
-            if action_steps:
-                st.write("**Reusable action steps:**")
-                for step in action_steps:
-                    st.write(f"• {step}")
 
         with col2:
 
@@ -1902,27 +1476,6 @@ elif page == "📘 Generate Runbook":
             )
 
             st.write(
-                "### Trust Status"
-            )
-
-            trust_status = runbook.get(
-                "Trust Status",
-                "PENDING HUMAN APPROVAL"
-            )
-
-            if trust_status == "TRUSTED / VERIFIED":
-                st.success(trust_status)
-            elif trust_status == "REJECTED":
-                st.error(trust_status)
-            else:
-                st.warning(trust_status)
-
-            st.write(
-                "### Human Reviewer"
-            )
-            st.write(runbook.get("Human Reviewer", "" ) or "Not approved yet")
-
-            st.write(
                 "### Confidence"
             )
 
@@ -1934,13 +1487,16 @@ elif page == "📘 Generate Runbook":
                 f"{runbook['Confidence']}%"
             )
 
-        st.write("### 🧪 Verification Steps")
-        verification_steps = runbook.get("Verification Steps", [])
-        if verification_steps:
-            for step in verification_steps:
-                st.write(f"• {step}")
-        else:
-            st.info("No explicit verification sentence was extracted; reviewer verification is still required.")
+            st.write("### Verification Steps Extracted")
+            verification_steps = runbook.get("Verification Steps", [])
+            if verification_steps:
+                for step_no, step in enumerate(verification_steps, 1):
+                    st.write(f"{step_no}. {step}")
+            else:
+                st.info("No explicit verification sentence was found in the reviewer evidence.")
+
+            st.write("### Evidence Sources")
+            st.write(" → ".join(runbook.get("Evidence Sources", [])))
 
         # ============================================================
         # EVIDENCE BEHIND RECOMMENDATION
@@ -2208,93 +1764,6 @@ elif page == "📘 Generate Runbook":
             f"{runbook['Confidence']}%**"
         )
 
-        # ============================================================
-        # CONFIDENCE RULES EXPLANATION
-        # ============================================================
-
-        st.divider()
-
-        st.subheader(
-            "📐 Confidence Calculation"
-        )
-
-        st.write(
-            "The confidence score is calculated from four explicit "
-            "evidence rules. The score is capped at 100%."
-        )
-
-        confidence_rules = runbook["Confidence Rules"]
-
-        rule_col1, rule_col2 = st.columns(2)
-
-        with rule_col1:
-
-            if confidence_rules["Pull Request"] > 0:
-                st.success(
-                    f"✓ Pull Request available  +{confidence_rules['Pull Request']}"
-                )
-            else:
-                st.error(
-                    "✗ Pull Request evidence missing  +0"
-                )
-
-            if confidence_rules["Incident Discussion"] > 0:
-                st.success(
-                    f"✓ Incident discussion available  +{confidence_rules['Incident Discussion']}"
-                )
-            else:
-                st.warning(
-                    "⚠ Incident discussion unavailable  +0"
-                )
-
-        with rule_col2:
-
-            if confidence_rules["Code Diff"] > 0:
-                st.success(
-                    f"✓ Code diff available  +{confidence_rules['Code Diff']}"
-                )
-            else:
-                st.warning(
-                    "⚠ Code diff unavailable  +0"
-                )
-
-            if confidence_rules["Reviewer Approved"] > 0:
-                st.success(
-                    f"✓ Reviewer approved  +{confidence_rules['Reviewer Approved']}"
-                )
-            else:
-                st.warning(
-                    "⚠ Reviewer approval not confirmed  +0"
-                )
-
-        st.divider()
-
-        st.write(
-            "### 🧮 Score Calculation"
-        )
-
-        score_parts = [
-            confidence_rules["Pull Request"],
-            confidence_rules["Incident Discussion"],
-            confidence_rules["Code Diff"],
-            confidence_rules["Reviewer Approved"],
-        ]
-
-        st.code(
-            " + ".join(str(x) for x in score_parts)
-            + f" = {runbook['Confidence']}%"
-        )
-
-        st.metric(
-            "Final Confidence",
-            f"{runbook['Confidence']}%"
-        )
-
-        st.caption(
-            "Rule weights: PR = 40, Incident = 15, "
-            "Code Diff = 15, Reviewer Approval = 30."
-        )
-
         st.divider()
 
         st.write(
@@ -2352,158 +1821,84 @@ elif page == "📘 Generate Runbook":
 
 elif page == "✅ Review Runbooks":
 
-    st.title("✅ Human Review & Trust Gate")
-
-    st.write(
-        "Every reusable runbook must pass evidence checks and a human review. "
-        "High-impact runbooks additionally require explicit human confirmation."
-    )
+    st.title("✅ Human Review & Trust Management")
+    st.write("A runbook becomes trusted only after explicit human approval. The trust state is stored in SQLite.")
 
     if not st.session_state.runbooks:
         st.info("Generate a runbook first.")
     else:
         for index, runbook in enumerate(st.session_state.runbooks):
-            _sync_runbook_trust(runbook)
-            pr_id = str(runbook.get("PR_ID", ""))
-            trust_status = runbook.get("Trust Status", "PENDING HUMAN APPROVAL")
-
             st.divider()
-            st.subheader(f"{pr_id} - {runbook.get('Title', '')}")
+            pr_id = runbook["PR_ID"]
+            st.subheader(f"{pr_id} - {runbook['Title']}")
+            st.write(f"**Current Trust Status:** {runbook.get('Trust Status', 'PENDING HUMAN APPROVAL')}")
+            st.write(f"**Verification:** {runbook['Verification Status']}")
 
-            c1, c2, c3 = st.columns(3)
-            with c1:
-                st.metric("Confidence", f"{runbook.get('Confidence', 0)}%")
-            with c2:
-                st.metric("Verification", runbook.get("Verification Status", "Unknown"))
-            with c3:
-                if trust_status == "TRUSTED / VERIFIED":
-                    st.success("TRUSTED / VERIFIED")
-                elif trust_status == "REJECTED":
-                    st.error("REJECTED")
-                else:
-                    st.warning(trust_status)
-
-            # Required evidence gates
-            incident_ok = get_incident(pr_id) is not None
-            diff_ok = get_diff(pr_id) is not None
-            reviewer_ok = str(runbook.get("Reviewer Status", "")).lower() == "approved"
-            verification_ok = runbook.get("Verification Status") == "Verified"
-
-            st.write("### Evidence Gate")
-            st.write(f"{'✅' if incident_ok else '❌'} Incident evidence")
-            st.write(f"{'✅' if diff_ok else '❌'} Code diff evidence")
-            st.write(f"{'✅' if reviewer_ok else '❌'} Source reviewer approval")
-            st.write(f"{'✅' if verification_ok else '❌'} Evidence verification")
-
-            if trust_status == "TRUSTED / VERIFIED":
-                st.success(
-                    f"Trusted by {runbook.get('Human Reviewer', 'human reviewer')} "
-                    f"at {runbook.get('Approved At', '')}."
-                )
-                st.info(
-                    f"Approval reason: {runbook.get('Approval Reason', '')}"
-                )
-
-                revoke_reviewer = st.text_input(
-                    "Reviewer name to revoke trust",
-                    key=f"revoke_reviewer_{index}",
-                    placeholder="Example: Reviewer001"
-                )
-                revoke_reason = st.text_area(
-                    "Reason for revoking trust",
-                    key=f"revoke_reason_{index}",
-                    placeholder="Example: New evidence invalidated the runbook."
-                )
-                if st.button("↩️ Revoke Trust", key=f"revoke_{index}"):
-                    ok, message = revoke_trust(runbook, revoke_reviewer, revoke_reason)
-                    if ok:
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-                continue
-
-            if not diff_ok:
+            if runbook["Changed File"] == "Code diff unavailable.":
                 st.error("❌ Approval blocked: Code diff is missing.")
                 continue
-            if not incident_ok:
-                st.error("❌ Approval blocked: Incident evidence is missing.")
-                continue
-            if not reviewer_ok:
+
+            if runbook["Reviewer Status"].lower() != "approved":
                 st.warning("⏳ Approval blocked: Source reviewer approval is required.")
                 continue
-            if not verification_ok:
-                st.warning("⏳ Approval blocked: Evidence verification is incomplete.")
-                continue
 
-            reviewer_name = st.text_input(
-                "Human reviewer name",
-                value=runbook.get("Human Reviewer", ""),
-                key=f"human_reviewer_{index}",
-                placeholder="Example: Reviewer001"
-            )
-
-            decision = st.radio(
-                "Human Decision",
-                ["Approve", "Reject", "Override"],
-                key=f"decision_{index}",
-                horizontal=True
-            )
+            reviewer_name = st.text_input("Human reviewer name", key=f"reviewer_{index}")
+            approval_reason = st.text_area("Approval / review reason", key=f"approval_reason_{index}",
+                                           placeholder="Explain why this runbook is reliable and reusable...")
 
             confirmation = True
-            if runbook.get("High Impact", False):
-                st.warning(
-                    "⚠️ HIGH-IMPACT ACTION: explicit human confirmation is mandatory."
-                )
-                confirmation = st.checkbox(
-                    "I confirm that this high-impact runbook has been manually reviewed and I understand the rollback path.",
-                    key=f"confirm_{index}",
-                    value=(str(runbook.get("Human Confirmation", "")) == "Yes")
-                )
+            if runbook["High Impact"]:
+                st.warning("⚠️ High-impact change detected. Additional confirmation is required.")
+                confirmation = st.checkbox("I confirm that I manually reviewed this high-impact runbook.", key=f"confirm_{index}")
 
-            approval_reason = st.text_area(
-                "Approval / override reason" if decision != "Reject" else "Rejection reason",
-                value=(runbook.get("Approval Reason", "") if decision != "Reject" else runbook.get("Rejection Reason", "")),
-                key=f"decision_reason_{index}",
-                placeholder="Explain the human decision and evidence checked."
-            )
+            col1, col2 = st.columns(2)
+            with col1:
+                if st.button("✅ Approve as Trusted Knowledge", key=f"approve_{index}"):
+                    if not reviewer_name.strip():
+                        st.error("Enter the human reviewer name.")
+                    elif not approval_reason.strip():
+                        st.error("Provide an approval reason.")
+                    elif not confirmation:
+                        st.error("Human confirmation is required for this high-impact runbook.")
+                    else:
+                        updated = update_trust(pr_id, "TRUSTED / VERIFIED", reviewer_name.strip(), approval_reason.strip())
+                        st.session_state.runbooks[index] = updated
+                        if pr_id not in st.session_state.approved_runbooks:
+                            st.session_state.approved_runbooks.append(pr_id)
+                        add_audit("Runbook Trusted", f"{pr_id} trusted by {reviewer_name.strip()}: {approval_reason.strip()}")
+                        st.success("Runbook is now TRUSTED / VERIFIED and persisted.")
 
-            if st.button(
-                "💾 Submit Human Decision",
-                key=f"submit_decision_{index}",
-                type="primary"
-            ):
-                if decision == "Reject":
-                    ok, message = reject_runbook(runbook, reviewer_name, approval_reason)
-                else:
-                    ok, message = approve_runbook(
-                        runbook,
-                        reviewer_name,
-                        approval_reason,
-                        high_impact_confirmation=confirmation,
-                        decision=decision
-                    )
+            with col2:
+                reject_reason = st.text_area("Rejection reason", key=f"reason_{index}")
+                if st.button("❌ Reject Runbook", key=f"reject_{index}"):
+                    if not reject_reason.strip():
+                        st.error("Please provide a rejection reason.")
+                    else:
+                        updated = update_trust(pr_id, "REJECTED", reviewer_name.strip(), rejection_reason=reject_reason.strip())
+                        st.session_state.runbooks[index] = updated
+                        if pr_id in st.session_state.approved_runbooks:
+                            st.session_state.approved_runbooks.remove(pr_id)
+                        add_audit("Runbook Rejected", f"{pr_id}: {reject_reason.strip()}")
+                        st.warning("Runbook rejected and the decision was persisted.")
 
-                if ok:
-                    st.success(message)
-                    st.rerun()
-                else:
-                    st.error(message)
+            if runbook.get("Trust Status") == "TRUSTED / VERIFIED":
+                st.success(f"Trusted by {runbook.get('Human Reviewer', 'Unknown reviewer')}")
+                revoke_reason = st.text_input("Reason to revoke (if needed)", key=f"revoke_reason_{index}")
+                if st.button("↩️ Revoke Trust", key=f"revoke_{index}"):
+                    if not revoke_reason.strip():
+                        st.error("A revocation reason is required.")
+                    else:
+                        updated = update_trust(pr_id, "REVOKED", runbook.get("Human Reviewer", ""), rejection_reason=revoke_reason.strip())
+                        st.session_state.runbooks[index] = updated
+                        if pr_id in st.session_state.approved_runbooks:
+                            st.session_state.approved_runbooks.remove(pr_id)
+                        add_audit("Runbook Trust Revoked", f"{pr_id}: {revoke_reason.strip()}")
+                        st.warning("Trust revoked and persisted.")
 
     if st.session_state.approved_runbooks:
         st.divider()
         st.subheader("✅ Trusted Runbooks")
-        trusted_rows = []
-        for pr_id in st.session_state.approved_runbooks:
-            meta = st.session_state.trusted_metadata.get(str(pr_id), {})
-            trusted_rows.append({
-                "PR_ID": pr_id,
-                "Trust Status": meta.get("Trust_Status", "TRUSTED / VERIFIED"),
-                "Human Reviewer": meta.get("Human_Reviewer", ""),
-                "Approval Reason": meta.get("Approval_Reason", ""),
-                "Approved At": meta.get("Approved_At", "")
-            })
-        st.dataframe(pd.DataFrame(trusted_rows), use_container_width=True, hide_index=True)
+        st.write(", ".join(st.session_state.approved_runbooks))
 
 
 # ============================================================
@@ -2573,17 +1968,76 @@ elif page == "🔌 API Integration":
 
 elif page == "🔄 Rollback Manager":
 
+    st.title("🔄 Rollback Manager")
+    st.warning("Prototype simulation only. No production code is modified.")
+
+    pr_id = st.selectbox("Select Pull Request", pull_requests["PR_ID"].tolist())
+    pr = get_pr(pr_id)
+    diff = get_diff(pr_id)
+
+    if pr is not None:
+        st.subheader(f"{pr_id} - {pr['Title']}")
+        if diff is not None:
+            col1, col2 = st.columns(2)
+            with col1:
+                st.write("### Previous Version")
+                st.code(str(diff["Old_Code"]))
+            with col2:
+                st.write("### Current Version")
+                st.code(str(diff["New_Code"]))
+
+        combined_text = str(pr["Title"]) + " " + str(pr["Description"]) + " " + str(pr["Resolution"])
+        high_impact = is_high_impact(combined_text)
+        rollback_confirmation = True
+        if high_impact:
+            st.error("🚨 High-impact change. Human confirmation required.")
+            rollback_confirmation = st.checkbox("I confirm that rollback is required.")
+
+        reason = st.text_area("Rollback Reason", placeholder="Explain why the rollback is required...")
+        if st.button("🔄 Record Rollback", type="primary"):
+            if not rollback_confirmation:
+                st.error("Human confirmation is required.")
+            elif not reason.strip():
+                st.error("Rollback reason is required.")
+            else:
+                record = {"PR_ID": pr_id, "Reason": reason.strip(),
+                          "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                          "Status": "Rollback Path Recorded"}
+                st.session_state.rollback_log.append(record)
+                persist_rollback(record)
+                add_audit("Rollback Recorded", f"{pr_id}: {reason.strip()}")
+                st.success("Rollback path recorded and persisted successfully.")
+
+    if st.session_state.rollback_log:
+        st.divider()
+        st.subheader("🔄 Rollback History")
+        st.dataframe(pd.DataFrame(st.session_state.rollback_log), use_container_width=True)
+
+
+# ============================================================
+# RISK CHECKER
+# ============================================================
+
+elif page == "⚠️ Risk Checker":
+
     st.title(
-        "🔄 Change Review & Rollback Manager"
+        "⚠️ Risk Checker"
     )
 
-    st.warning(
+    st.write(
         """
-        Prototype simulation only.
+        The prototype uses rule-based detection to identify
+        potentially high-impact maintenance changes.
+        """
+    )
 
-        This feature does NOT modify production code.
-        It records the change-review decision and the rollback path.
-        High-impact changes require explicit human confirmation.
+    st.info(
+        """
+        High-impact keywords:
+
+        authentication • security • password • permission •
+        database • payment • delete • production •
+        credential • access
         """
     )
 
@@ -2593,13 +2047,8 @@ elif page == "🔄 Rollback Manager":
     )
 
     pr = get_pr(pr_id)
-    diff = get_diff(pr_id)
 
     if pr is not None:
-
-        st.subheader(
-            f"{pr_id} - {pr['Title']}"
-        )
 
         combined_text = (
             str(pr["Title"])
@@ -2613,14 +2062,8 @@ elif page == "🔄 Rollback Manager":
             combined_text
         )
 
-        # --------------------------------------------------------
-        # CHANGE REVIEW
-        # --------------------------------------------------------
-
-        st.divider()
-
         st.subheader(
-            "🔍 Change Review"
+            f"Risk Result — {pr_id}"
         )
 
         if high_impact:
@@ -2630,8 +2073,10 @@ elif page == "🔄 Rollback Manager":
             )
 
             st.write(
-                "Human review and explicit confirmation are required "
-                "before this change can be accepted as a trusted maintenance change."
+                """
+                Human confirmation is required before
+                this change can become trusted maintenance knowledge.
+                """
             )
 
         else:
@@ -2641,375 +2086,8 @@ elif page == "🔄 Rollback Manager":
             )
 
             st.write(
-                "Standard human change review is required."
+                "Standard human review can be followed."
             )
-
-        review_actor = st.text_input(
-            "Reviewer / Change Owner",
-            placeholder="Example: Reviewer001"
-        )
-
-        review_decision = st.radio(
-            "Change Review Decision",
-            [
-                "Approve Change",
-                "Reject Change"
-            ],
-            horizontal=True
-        )
-
-        if high_impact:
-
-            change_confirmation = st.checkbox(
-                "I confirm that I reviewed the high-impact change, "
-                "understand the risk, and have checked the rollback path."
-            )
-
-        else:
-
-            change_confirmation = True
-
-        change_reason = st.text_area(
-            "Change Review Reason",
-            placeholder=(
-                "Explain why this change is approved or rejected..."
-            )
-        )
-
-        if st.button(
-            "📋 Record Change Review",
-            type="primary"
-        ):
-
-            if not review_actor.strip():
-
-                st.error(
-                    "Reviewer / Change Owner is required."
-                )
-
-            elif high_impact and not change_confirmation:
-
-                st.error(
-                    "Explicit human confirmation is required for high-impact changes."
-                )
-
-            elif not change_reason.strip():
-
-                st.error(
-                    "Change review reason is required."
-                )
-
-            else:
-
-                review_record = {
-
-                    "PR_ID":
-                        pr_id,
-
-                    "Reviewer":
-                        review_actor,
-
-                    "Decision":
-                        review_decision,
-
-                    "Risk":
-                        "High Impact" if high_impact else "Normal Impact",
-
-                    "Confirmation":
-                        bool(change_confirmation),
-
-                    "Reason":
-                        change_reason,
-
-                    "Timestamp":
-                        datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        )
-                }
-
-                st.session_state.change_review_log.append(
-                    review_record
-                )
-
-                add_audit(
-                    "Change Review Recorded",
-                    f"{pr_id}: {review_decision}",
-                    pr_id=pr_id,
-                    actor=review_actor,
-                    decision=review_decision,
-                    risk=(
-                        "High Impact"
-                        if high_impact
-                        else "Normal Impact"
-                    ),
-                    reason=change_reason,
-                    confirmation=str(change_confirmation)
-                )
-
-                if review_decision == "Approve Change":
-
-                    st.success(
-                        "✅ Change review approved and recorded."
-                    )
-
-                else:
-
-                    st.warning(
-                        "⚠️ Change review rejected and recorded."
-                    )
-
-        # --------------------------------------------------------
-        # CHANGE REVIEW HISTORY
-        # --------------------------------------------------------
-
-        if st.session_state.change_review_log:
-
-            st.write(
-                "### 📋 Change Review History"
-            )
-
-            st.dataframe(
-                pd.DataFrame(
-                    st.session_state.change_review_log
-                ),
-                use_container_width=True
-            )
-
-        # --------------------------------------------------------
-        # ROLLBACK PATH
-        # --------------------------------------------------------
-
-        st.divider()
-
-        st.subheader(
-            "🔄 Rollback Path"
-        )
-
-        st.write(
-            "The rollback path records what would be restored, "
-            "why rollback is required, and who confirmed it. "
-            "No production code is changed by this prototype."
-        )
-
-        if diff is not None:
-
-            col1, col2 = st.columns(2)
-
-            with col1:
-
-                st.write(
-                    "### Previous Version"
-                )
-
-                st.code(
-                    str(diff["Old_Code"])
-                )
-
-            with col2:
-
-                st.write(
-                    "### Current Version"
-                )
-
-                st.code(
-                    str(diff["New_Code"])
-                )
-
-        if high_impact:
-
-            rollback_confirmation = st.checkbox(
-                "I confirm that rollback is required and I have reviewed the rollback path."
-            )
-
-        else:
-
-            rollback_confirmation = True
-
-        rollback_actor = st.text_input(
-            "Rollback Reviewer",
-            placeholder="Example: Reviewer001",
-            key=f"rollback_actor_{pr_id}"
-        )
-
-        reason = st.text_area(
-            "Rollback Reason",
-            placeholder="Explain why the rollback is required...",
-            key=f"rollback_reason_{pr_id}"
-        )
-
-        if st.button(
-            "🔄 Record Rollback",
-            type="secondary"
-        ):
-
-            if not rollback_actor.strip():
-
-                st.error(
-                    "Rollback reviewer is required."
-                )
-
-            elif not rollback_confirmation:
-
-                st.error(
-                    "Human confirmation is required for this rollback."
-                )
-
-            elif not reason.strip():
-
-                st.error(
-                    "Rollback reason is required."
-                )
-
-            else:
-
-                record = {
-
-                    "PR_ID":
-                        pr_id,
-
-                    "Reviewer":
-                        rollback_actor,
-
-                    "Reason":
-                        reason,
-
-                    "Risk":
-                        "High Impact" if high_impact else "Normal Impact",
-
-                    "Confirmation":
-                        bool(rollback_confirmation),
-
-                    "Timestamp":
-                        datetime.now().strftime(
-                            "%Y-%m-%d %H:%M:%S"
-                        ),
-
-                    "Status":
-                        "Rollback Path Recorded"
-                }
-
-                st.session_state.rollback_log.append(
-                    record
-                )
-
-                _write_records(
-                    ROLLBACK_FILE,
-                    st.session_state.rollback_log
-                )
-
-                add_audit(
-                    "Rollback Recorded",
-                    f"{pr_id}: {reason}",
-                    pr_id=pr_id,
-                    actor=rollback_actor,
-                    decision="Rollback",
-                    risk=(
-                        "High Impact"
-                        if high_impact
-                        else "Normal Impact"
-                    ),
-                    reason=reason,
-                    confirmation=str(rollback_confirmation)
-                )
-
-                st.success(
-                    "✅ Rollback path recorded successfully."
-                )
-
-    if st.session_state.rollback_log:
-
-        st.divider()
-
-        st.subheader(
-            "🔄 Rollback History"
-        )
-
-        st.dataframe(
-            pd.DataFrame(
-                st.session_state.rollback_log
-            ),
-            use_container_width=True
-        )
-
-
-# ============================================================
-
-# RISK CHECKER
-# ============================================================
-
-elif page == "⚠️ Risk Checker":
-
-    st.title("⚠️ Risk Checker")
-
-    st.write(
-        "The prototype uses explainable keyword rules to identify potentially high-impact changes."
-    )
-
-    st.info(
-        "High-impact keywords: authentication • security • password • permission • database • payment • delete • production • credential • access"
-    )
-
-    pr_id = st.selectbox("Select Pull Request", pull_requests["PR_ID"].tolist())
-    pr = get_pr(pr_id)
-
-    if pr is not None:
-        combined_text = f"{pr['Title']} {pr['Description']} {pr['Resolution']}"
-        high_impact = is_high_impact(combined_text)
-        runbook = _find_runbook(pr_id)
-
-        if high_impact:
-            st.error("🚨 HIGH-IMPACT CHANGE")
-            st.write("Human confirmation is required before this change can become trusted maintenance knowledge.")
-        else:
-            st.success("✅ NORMAL-IMPACT CHANGE")
-
-        if runbook is None:
-            if st.button("📘 Generate Evidence-Backed Runbook", type="primary"):
-                generated = generate_runbook(pr_id)
-                if generated:
-                    st.session_state.runbooks.append(generated)
-                    _db_save_runbook(generated)
-                    add_audit("Runbook Generated", f"Runbook generated from Risk Checker for {pr_id}", pr_id=pr_id)
-                    st.rerun()
-        else:
-            _sync_runbook_trust(runbook)
-            st.write(f"**Trust Status:** {runbook.get('Trust Status', 'PENDING HUMAN APPROVAL')}")
-            st.write(f"**Verification:** {runbook.get('Verification Status', 'Unknown')}")
-
-            if high_impact and runbook.get("Trust Status") != "TRUSTED / VERIFIED":
-                confirmation = st.checkbox(
-                    "I confirm that I have manually reviewed this high-impact runbook and checked the rollback path.",
-                    key=f"risk_confirm_{pr_id}",
-                    value=(pr_id in st.session_state.human_confirmations)
-                )
-                reviewer = st.text_input(
-                    "Human reviewer name",
-                    key=f"risk_reviewer_{pr_id}",
-                    placeholder="Example: Reviewer001"
-                )
-                reason = st.text_area(
-                    "Human confirmation / approval reason",
-                    key=f"risk_reason_{pr_id}",
-                    placeholder="Explain what evidence you checked."
-                )
-
-                if st.button("🔐 Confirm & Approve as Trusted Knowledge", key=f"risk_approve_{pr_id}", type="primary"):
-                    ok, message = approve_runbook(
-                        runbook,
-                        reviewer,
-                        reason,
-                        high_impact_confirmation=confirmation,
-                        decision="Approve"
-                    )
-                    if ok:
-                        st.success(message)
-                        st.rerun()
-                    else:
-                        st.error(message)
-            elif runbook.get("Trust Status") == "TRUSTED / VERIFIED":
-                st.success("🟢 This runbook is already TRUSTED / VERIFIED.")
-            else:
-                st.info("Normal-impact runbooks still require standard human review in Review Runbooks.")
 
 
 # ============================================================
@@ -3173,19 +2251,9 @@ elif page == "📝 Audit Trail":
             st.session_state.audit_log
         )
 
-        st.caption(f"Durable SQLite store: {SQLITE_FILE}  |  CSV export: {AUDIT_FILE}")
-
         st.dataframe(
             audit_df,
-            use_container_width=True,
-            hide_index=True
-        )
-
-        st.download_button(
-            "⬇️ Download Audit Trail CSV",
-            audit_df.to_csv(index=False),
-            file_name="maintenance_audit_trail.csv",
-            mime="text/csv"
+            use_container_width=True
         )
 
         st.subheader(
@@ -3228,383 +2296,110 @@ elif page == "📝 Audit Trail":
 
 elif page == "📊 Validation Dashboard":
 
-    st.title(
-        "📊 Validation Dashboard"
-    )
+    st.title("📊 Validation Dashboard")
+    st.write("Measure whether the assistant reduces the time required for a new engineer to repeat a known maintenance fix.")
 
-    st.write(
-        """
-        Measure whether the assistant reduces the time required
-        for a new engineer to repeat a known maintenance fix.
-        """
-    )
-
-    st.subheader(
-        "➕ Add Experiment Result"
-    )
-
+    st.subheader("➕ Add Experiment Result")
     col1, col2 = st.columns(2)
-
     with col1:
-
-        test_case = st.text_input(
-            "Test Case",
-            placeholder="Example: Redis timeout fix"
-        )
-
-        baseline_time = st.number_input(
-            "Baseline Time (minutes)",
-            min_value=1.0,
-            value=60.0
-        )
-
+        tester_id = st.text_input("Tester / Engineer ID", placeholder="Engineer-01")
+        test_case = st.text_input("Test Case", placeholder="Example: Redis timeout fix")
+        baseline_time = st.number_input("Baseline Time (minutes)", min_value=0.1, value=60.0)
     with col2:
+        assistant_time = st.number_input("With Assistant (minutes)", min_value=0.1, value=30.0)
+        result = st.selectbox("Result", ["Success", "Partial Success", "Failure"])
+        correctness = st.selectbox("Recommendation Correctness", ["Correct", "Partially Correct", "Incorrect", "Not Assessed"])
 
-        assistant_time = st.number_input(
-            "With Assistant (minutes)",
-            min_value=1.0,
-            value=30.0
-        )
+    observation = st.text_area("Observation / Error Analysis", placeholder="Record errors, missing evidence, wrong steps, or what made the run successful...")
 
-        tester = st.text_input(
-            "Tester / Engineer ID (anonymised)",
-            placeholder="Example: Engineer-01"
-        )
-
-        correctness = st.selectbox(
-            "Recommendation correctness",
-            ["Correct", "Partially Correct", "Incorrect"]
-        )
-
-        result = st.selectbox(
-            "Result",
-            [
-                "Success",
-                "Partial Success",
-                "Failure"
-            ]
-        )
-
-    observation = st.text_area(
-        "Observation / Error Analysis",
-        placeholder="Describe what happened during the test..."
-    )
-
-    if st.button(
-        "➕ Add Result",
-        type="primary"
-    ):
-
-        if not test_case.strip():
-
-            st.error(
-                "Please enter a test case."
-            )
-
+    if st.button("➕ Add Result", type="primary"):
+        if not tester_id.strip() or not test_case.strip():
+            st.error("Tester / Engineer ID and Test Case are required.")
         else:
-
-            # Do not block regressions. Negative reduction is valuable
-            # validation evidence and belongs in error analysis.
-            time_saved = (
-                baseline_time
-                - assistant_time
-            )
-
-            reduction = (
-                time_saved
-                / baseline_time
-            ) * 100
-
+            time_saved = baseline_time - assistant_time
+            reduction = (time_saved / baseline_time) * 100
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             experiment = {
-
-                "Test Case":
-                    test_case,
-
-                "Baseline Minutes":
-                    baseline_time,
-
-                "Assistant Minutes":
-                    assistant_time,
-
-                "Time Saved":
-                    time_saved,
-
-                "Reduction %":
-                    reduction,
-
-                "Tester":
-                    tester.strip(),
-
-                "Correctness":
-                    correctness,
-
-                "Result":
-                    result,
-
-                "Observation":
-                    observation
+                "Tester ID": tester_id.strip(),
+                "Test Case": test_case.strip(),
+                "Baseline Minutes": float(baseline_time),
+                "Assistant Minutes": float(assistant_time),
+                "Time Saved": float(time_saved),
+                "Reduction %": float(reduction),
+                "Result": result,
+                "Correctness": correctness,
+                "Observation": observation.strip(),
+                "Timestamp": timestamp
             }
-
-            st.session_state.experiment_results.append(
-                experiment
-            )
-
-            _write_records(
-                EXPERIMENT_FILE,
-                st.session_state.experiment_results
-            )
-            _db_save_validation(experiment)
-
-            add_audit(
-                "Validation Result Added",
-                test_case
-            )
-
-            st.success(
-                "Validation result added successfully."
-            )
-
-    # ========================================================
-    # DISPLAY VALIDATION RESULTS
-    # ========================================================
+            st.session_state.experiment_results.append(experiment)
+            persist_validation(experiment)
+            add_audit("Validation Result Added", f"{test_case.strip()} by {tester_id.strip()}")
+            st.success("Validation result saved permanently.")
 
     if st.session_state.experiment_results:
-
-        results_df = pd.DataFrame(
-            st.session_state.experiment_results
-        )
-
+        results_df = pd.DataFrame(st.session_state.experiment_results)
         st.divider()
+        st.subheader("📈 Experiment Metrics")
 
-        st.subheader(
-            "📈 Experiment Metrics"
-        )
+        baselines = results_df["Baseline Minutes"].astype(float).tolist()
+        assistants = results_df["Assistant Minutes"].astype(float).tolist()
+        reductions = results_df["Reduction %"].astype(float).tolist()
+        saved = results_df["Time Saved"].astype(float).tolist()
+        avg_baseline = statistics.mean(baselines)
+        avg_assistant = statistics.mean(assistants)
+        avg_saved = statistics.mean(saved)
+        avg_reduction = statistics.mean(reductions)
+        median_reduction = statistics.median(reductions)
+        std_reduction = statistics.stdev(reductions) if len(reductions) > 1 else 0.0
+        success_rate = (results_df["Result"] == "Success").mean() * 100
+        correctness_rate = (results_df["Correctness"] == "Correct").mean() * 100
+        regression_count = int((results_df["Assistant Minutes"] > results_df["Baseline Minutes"]).sum())
+        target = 30.0
 
-        avg_baseline = results_df[
-            "Baseline Minutes"
-        ].mean()
+        metrics = st.columns(6)
+        metrics[0].metric("Avg Baseline", f"{avg_baseline:.1f} min")
+        metrics[1].metric("Avg Assistant", f"{avg_assistant:.1f} min")
+        metrics[2].metric("Avg Saved", f"{avg_saved:.1f} min")
+        metrics[3].metric("Avg Reduction", f"{avg_reduction:.1f}%")
+        metrics[4].metric("Success Rate", f"{success_rate:.1f}%")
+        metrics[5].metric("Correctness", f"{correctness_rate:.1f}%")
 
-        avg_assistant = results_df[
-            "Assistant Minutes"
-        ].mean()
-
-        avg_saved = results_df[
-            "Time Saved"
-        ].mean()
-
-        avg_reduction = results_df[
-            "Reduction %"
-        ].mean()
-
-        median_reduction = results_df["Reduction %"].median()
-        reduction_std = results_df["Reduction %"].std(ddof=1) if len(results_df) > 1 else 0.0
-        regression_count = int((results_df["Reduction %"] < 0).sum())
-        correctness_rate = (results_df["Correctness"] == "Correct").mean() * 100 if "Correctness" in results_df.columns else 0.0
-        success_rate = (
-            results_df["Result"]
-            == "Success"
-        ).mean() * 100
-
-        col1, col2, col3, col4, col5, col6, col7, col8 = st.columns(8)
-
-        with col1:
-
-            st.metric(
-                "Avg Baseline",
-                f"{avg_baseline:.1f} min"
-            )
-
-        with col2:
-
-            st.metric(
-                "Avg Assistant",
-                f"{avg_assistant:.1f} min"
-            )
-
-        with col3:
-
-            st.metric(
-                "Avg Time Saved",
-                f"{avg_saved:.1f} min"
-            )
-
-        with col4:
-
-            st.metric(
-                "Avg Reduction",
-                f"{avg_reduction:.1f}%"
-            )
-
-        with col5:
-
-            st.metric(
-                "Success Rate",
-                f"{success_rate:.1f}%"
-            )
-        with col6:
-            st.metric("Median Reduction", f"{median_reduction:.1f}%")
-        with col7:
-            st.metric("Correctness", f"{correctness_rate:.1f}%")
-        with col8:
-            st.metric("Regressions", str(regression_count))
-
-        st.caption(f"Reduction standard deviation: {reduction_std:.1f} percentage points. Negative reduction means the assistant was slower and is retained for error analysis.")
-
-        # ----------------------------------------------------
-        # TARGET
-        # ----------------------------------------------------
-
-        target = 30
-
-        st.subheader(
-            "🎯 Target"
-        )
-
+        st.subheader("🎯 Evaluation Target")
+        st.write(f"Target reduction: **{target:.0f}%**")
+        st.write(f"Measured average reduction: **{avg_reduction:.1f}%**")
         if avg_reduction >= target:
-
-            st.success(
-                f"""
-                Target achieved!
-
-                Target: {target}% reduction
-
-                Measured: {avg_reduction:.1f}% reduction
-                """
-            )
-
+            st.success("Target achieved in the currently recorded test data.")
         else:
+            st.warning("Target not yet achieved in the currently recorded test data.")
 
-            st.warning(
-                f"""
-                Target not yet achieved.
+        st.subheader("📊 Statistical Summary")
+        stat_col1, stat_col2, stat_col3 = st.columns(3)
+        stat_col1.metric("Median Reduction", f"{median_reduction:.1f}%")
+        stat_col2.metric("Std. Dev. of Reduction", f"{std_reduction:.1f}%")
+        stat_col3.metric("Regression Cases", str(regression_count))
+        st.caption("Regression cases are retained intentionally: the assistant is not forced to look faster than baseline.")
 
-                Target: {target}% reduction
+        st.subheader("📋 Experiment Results")
+        st.dataframe(results_df, use_container_width=True)
 
-                Measured: {avg_reduction:.1f}% reduction
-                """
-            )
-
-        # ----------------------------------------------------
-        # STATISTICAL / ERROR ANALYSIS
-        # ----------------------------------------------------
-        st.subheader("📐 Evaluation Analysis")
-        st.write(f"**Cases evaluated:** {len(results_df)}")
-        st.write(f"**Median reduction:** {median_reduction:.1f}%")
-        st.write(f"**Variation (sample SD):** {reduction_std:.1f} percentage points")
-        st.write(f"**Correct recommendations:** {int((results_df.get('Correctness', pd.Series(dtype=str)) == 'Correct').sum()) if 'Correctness' in results_df.columns else 'Not recorded'}")
-        st.write(f"**Regressions (assistant slower):** {regression_count}")
-        if regression_count:
-            st.warning("Regression cases are retained rather than hidden; review their observations before claiming improvement.")
+        st.subheader("🔍 Error Analysis")
+        non_success = results_df[results_df["Result"] != "Success"]
+        incorrect = results_df[results_df["Correctness"].isin(["Partially Correct", "Incorrect"])]
+        if non_success.empty and incorrect.empty and regression_count == 0:
+            st.success("No failures, incorrect recommendations, or regressions recorded yet.")
         else:
-            st.success("No regression cases recorded in the current sample.")
+            st.write(f"**Non-success cases:** {len(non_success)}")
+            st.write(f"**Partially correct / incorrect recommendations:** {len(incorrect)}")
+            st.write(f"**Regression cases:** {regression_count}")
+            analysis_df = pd.concat([non_success, incorrect]).drop_duplicates(subset=["Tester ID", "Test Case", "Timestamp"])
+            if not analysis_df.empty:
+                st.dataframe(analysis_df[["Tester ID", "Test Case", "Result", "Correctness", "Baseline Minutes", "Assistant Minutes", "Reduction %", "Observation"]], use_container_width=True)
 
-        # ----------------------------------------------------
-        # RESULTS TABLE
-        # ----------------------------------------------------
-
-        st.subheader(
-            "📋 Experiment Results"
-        )
-
-        st.dataframe(
-            results_df,
-            use_container_width=True
-        )
-
-        # ----------------------------------------------------
-        # SIMPLE VISUAL COMPARISON
-        # ----------------------------------------------------
-
-        st.subheader(
-            "⏱️ Time Comparison"
-        )
-
-        for _, row in results_df.iterrows():
-
-            st.write(
-                f"**{row['Test Case']}**"
-            )
-
-            baseline = float(
-                row["Baseline Minutes"]
-            )
-
-            assistant = float(
-                row["Assistant Minutes"]
-            )
-
-            percentage = int(
-                min(
-                    (assistant / baseline) * 100,
-                    100
-                )
-            )
-
-            st.write(
-                f"Baseline: {baseline:.1f} minutes"
-            )
-
-            st.progress(
-                100
-            )
-
-            st.write(
-                f"Assistant: {assistant:.1f} minutes"
-            )
-
-            st.progress(
-                percentage
-            )
-
-            st.write(
-                f"Time saved: "
-                f"{row['Time Saved']:.1f} minutes "
-                f"({row['Reduction %']:.1f}%)"
-            )
-
-            st.divider()
-
-        # ----------------------------------------------------
-        # ERROR ANALYSIS
-        # ----------------------------------------------------
-
-        st.subheader(
-            "🔍 Error Analysis"
-        )
-
-        failures = results_df[
-            results_df["Result"] != "Success"
-        ]
-
-        if failures.empty:
-
-            st.success(
-                "No failed or partial validation cases recorded."
-            )
-
-        else:
-
-            st.warning(
-                f"{len(failures)} validation case(s) "
-                "need further analysis."
-            )
-
-            st.dataframe(
-                failures[
-                    [
-                        "Test Case",
-                        "Result",
-                        "Observation"
-                    ]
-                ],
-                use_container_width=True
-            )
-
+        st.subheader("👥 Tester Coverage")
+        st.write(f"Unique testers: **{results_df['Tester ID'].nunique()}**")
+        st.write(f"Test cases recorded: **{len(results_df)}**")
     else:
-
-        st.info(
-            "Add experiment results to display validation metrics."
-        )
+        st.info("Add experiment results to display validation metrics.")
 
 
 # ============================================================
