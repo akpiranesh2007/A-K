@@ -834,27 +834,69 @@ if "persistent_state_loaded" not in st.session_state:
     st.session_state.rollback_log = saved_rollbacks
     st.session_state.experiment_results = saved_validations
 
-    # Keep lightweight runbook summaries available after a refresh.
+    # Restore the COMPLETE runbook after a refresh.
+    # Earlier versions rebuilt only a small summary, which removed fields
+    # such as Changed File, Old Code and New Code and caused KeyError.
     for saved in saved_runbooks:
+        if not isinstance(saved, dict):
+            continue
+
+        # Current SQLite rows store the complete runbook using the same
+        # title-style keys used by the Streamlit UI. Older rows may use
+        # lowercase database column names, so support both formats.
+        restored = dict(saved)
+
+        if "PR_ID" not in restored:
+            restored["PR_ID"] = restored.get("pr_id", "")
+        if "Title" not in restored:
+            restored["Title"] = restored.get("title", "")
+        if "Problem" not in restored:
+            restored["Problem"] = restored.get("problem", "")
+        if "Root Cause" not in restored:
+            restored["Root Cause"] = restored.get("root_cause", "")
+        if "Solution" not in restored:
+            restored["Solution"] = restored.get("solution", "")
+        if "Reviewer" not in restored:
+            restored["Reviewer"] = restored.get("reviewer", "")
+        if "Reviewer Status" not in restored:
+            restored["Reviewer Status"] = restored.get("reviewer_status", "")
+        if "Verification Status" not in restored:
+            restored["Verification Status"] = restored.get("verification_status", "")
+        if "Confidence" not in restored:
+            restored["Confidence"] = restored.get("confidence", 0) or 0
+        if "High Impact" not in restored:
+            restored["High Impact"] = bool(restored.get("high_impact", 0))
+        if "Trust Status" not in restored:
+            restored["Trust Status"] = restored.get(
+                "trust_status",
+                "PENDING HUMAN APPROVAL"
+            )
+        if "Created At" not in restored:
+            restored["Created At"] = restored.get("created_at", "")
+
+        # Fields required by the review/evidence screens.
+        restored.setdefault("Changed File", "Code diff unavailable.")
+        restored.setdefault("Old Code", "Not available.")
+        restored.setdefault("New Code", "Not available.")
+        restored.setdefault("Verification", restored.get("Verification Status", ""))
+        restored.setdefault("Confidence Rules", {})
+        restored.setdefault("Incident Resolution", "Not available.")
+        restored.setdefault("Action Steps", [])
+        restored.setdefault("Verification Steps", [])
+        restored.setdefault("Structured Evidence", {})
+        restored.setdefault("Human Review Status", "Pending")
+        restored.setdefault("Human Confirmation", "Required" if restored.get("High Impact") else "Not Required")
+        restored.setdefault("Human Reviewer", "")
+        restored.setdefault("Approval Reason", "")
+        restored.setdefault("Rejection Reason", "")
+
         existing = [
             r for r in st.session_state.runbooks
-            if r.get("PR_ID") == saved.get("pr_id")
+            if r.get("PR_ID") == restored.get("PR_ID")
         ]
+
         if not existing:
-            st.session_state.runbooks.append({
-                "PR_ID": saved.get("pr_id", ""),
-                "Title": saved.get("title", ""),
-                "Problem": saved.get("problem", ""),
-                "Root Cause": saved.get("root_cause", ""),
-                "Solution": saved.get("solution", ""),
-                "Reviewer": saved.get("reviewer", ""),
-                "Reviewer Status": saved.get("reviewer_status", ""),
-                "Verification Status": saved.get("verification_status", ""),
-                "Confidence": saved.get("confidence", 0),
-                "High Impact": bool(saved.get("high_impact", 0)),
-                "Trust Status": saved.get("trust_status", "PENDING HUMAN APPROVAL"),
-                "Created At": saved.get("created_at", "")
-            })
+            st.session_state.runbooks.append(restored)
 
     st.session_state.persistent_state_loaded = True
 
